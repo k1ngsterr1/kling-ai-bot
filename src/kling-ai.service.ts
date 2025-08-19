@@ -42,28 +42,30 @@ export class KlingAiService {
       },
     });
 
-    // Add request interceptor for logging
+    // Add request interceptor for minimal logging
     this.httpClient.interceptors.request.use(
       (config) => {
-        this.logger.debug(`Making request to: ${config.url}`);
+        this.logger.debug(
+          `Kling AI Request: ${config.method?.toUpperCase()} ${config.url}`,
+        );
         return config;
       },
       (error) => {
-        this.logger.error('Request error:', error);
+        this.logger.error('Kling AI Request error:', error.message);
         return Promise.reject(error);
       },
     );
 
-    // Add response interceptor for logging
+    // Add response interceptor for minimal logging
     this.httpClient.interceptors.response.use(
       (response) => {
-        this.logger.debug(`Response status: ${response.status}`);
+        this.logger.debug(`Kling AI Response: ${response.status}`);
         return response;
       },
       (error) => {
         this.logger.error(
-          'Response error:',
-          error.response?.data || error.message,
+          'Kling AI API Error:',
+          error.response?.status || error.message,
         );
         return Promise.reject(error);
       },
