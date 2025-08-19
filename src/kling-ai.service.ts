@@ -25,8 +25,12 @@ export class KlingAiService {
   private readonly secretKey: string;
 
   constructor(private configService: ConfigService) {
-    this.accessKey = 'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
-    this.secretKey = 'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
+    this.accessKey =
+      this.configService.get<string>('KLING_ACCESS_KEY') ||
+      'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
+    this.secretKey =
+      this.configService.get<string>('KLING_SECRET_KEY') ||
+      'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
 
     this.httpClient = axios.create({
       baseURL: 'https://api.kling.ai/v1', // Replace with actual Kling AI API base URL
