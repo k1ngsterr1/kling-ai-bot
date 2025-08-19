@@ -248,6 +248,15 @@ export class TelegramBotService {
       case 'quality_master':
         this.handleQualitySelection(chatId, 'master');
         break;
+      case 'duration_5':
+        this.handleDurationChoice(chatId, 5);
+        break;
+      case 'duration_10':
+        this.handleDurationChoice(chatId, 10);
+        break;
+      case 'change_duration':
+        this.handleDurationSelection(chatId);
+        break;
       case 'confirm_generation':
         this.handleGenerationConfirmation(chatId);
         break;
@@ -343,7 +352,58 @@ export class TelegramBotService {
       return;
     }
 
-    const { prompt, images = [] } = userState.data;
+    // Save the selected quality
+    this.userStates.set(chatId, {
+      ...userState,
+      data: { ...userState.data, quality },
+    });
+
+    // Show duration selection
+    this.handleDurationSelection(chatId);
+  }
+
+  private handleDurationSelection(chatId: number) {
+    const durationText = `
+⏱️ Выберите длительность видео:
+
+▫️ 5 СЕКУНД: 4 токена
+   └ Идеально для TikTok/Reels/Shorts
+
+▫️ 10 СЕКУНД: 8 токенов
+   └ Полноценная сцена с развитием
+
+👇 Выберите вариант:
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '[5 секунд]', callback_data: 'duration_5' }],
+        [{ text: '[10 секунд]', callback_data: 'duration_10' }],
+        [{ text: '[Назад]', callback_data: 'video_settings' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, durationText, { reply_markup: keyboard });
+  }
+
+  private handleDurationChoice(chatId: number, duration: number) {
+    const userState = this.userStates.get(chatId);
+
+    if (!userState?.data) {
+      this.bot.sendMessage(
+        chatId,
+        'Ошибка: данные не найдены. Начните заново с /video',
+      );
+      return;
+    }
+
+    const { prompt, images = [], quality } = userState.data;
+
+    // Save the selected duration
+    this.userStates.set(chatId, {
+      ...userState,
+      data: { ...userState.data, duration },
+    });
 
     const qualityNames = {
       standard: '⚡ STANDARD',
@@ -351,17 +411,7 @@ export class TelegramBotService {
       master: '💎 MASTER',
     };
 
-    const costs = {
-      standard: '1 токен за 5s',
-      pro: '2 токена за 5s',
-      master: '4 токена за 5s',
-    };
-
-    // Save the selected quality
-    this.userStates.set(chatId, {
-      ...userState,
-      data: { ...userState.data, quality },
-    });
+    const totalCost = duration === 5 ? 4 : 8; // 4 tokens for 5s, 8 tokens for 10s
 
     const confirmationText = `
 ✅ Настройки генерации:
@@ -369,7 +419,8 @@ export class TelegramBotService {
 📝 Промпт: "${prompt}"
 📸 Изображений: ${images.length}/2
 🎚️ Качество: ${qualityNames[quality]}
-💰 Стоимость: ${costs[quality]}
+⏱️ Длительность: ${duration} секунд
+💰 Общая стоимость: ${totalCost} токенов
 
 ⚠️ После подтверждения токены будут списаны с баланса.
 
@@ -384,7 +435,13 @@ export class TelegramBotService {
             callback_data: 'confirm_generation',
           },
         ],
-        [{ text: '🔙 Изменить настройки', callback_data: 'video_settings' }],
+        [
+          {
+            text: '🔙 Изменить длительность',
+            callback_data: 'change_duration',
+          },
+        ],
+        [{ text: '⚙️ Изменить качество', callback_data: 'video_settings' }],
         [{ text: '🏠 Главное меню', callback_data: 'main' }],
       ],
     };
@@ -403,17 +460,27 @@ export class TelegramBotService {
       return;
     }
 
-    const { prompt, images = [], quality } = userState.data;
+    const { prompt, images = [], quality, duration } = userState.data;
 
     // Clear user state as generation is starting
     this.userStates.delete(chatId);
+
+    const qualityNames = {
+      standard: '⚡ STANDARD',
+      pro: '🎓 PRO',
+      master: '💎 MASTER',
+    };
+
+    const totalCost = duration === 5 ? 4 : 8;
 
     const generationText = `
 🎬 Генерация видео запущена!
 
 📝 Промпт: "${prompt}"
 📸 Изображений: ${images.length}/2
-🎚️ Качество: ${quality}
+🎚️ Качество: ${qualityNames[quality]}
+⏱️ Длительность: ${duration} секунд
+💰 Списано: ${totalCost} токенов
 
 ⏳ Ожидайте... Это может занять несколько минут.
 Мы уведомим вас, когда видео будет готово.
