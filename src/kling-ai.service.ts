@@ -32,12 +32,20 @@ export class KlingAiService {
       this.configService.get<string>('KLING_SECRET_KEY') ||
       'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
 
+    // Try different base URLs if needed
+    const baseURLs = [
+      'https://api.klingai.com',
+      'https://api.kling.ai',
+      'https://kling.ai/api',
+    ];
+
     this.httpClient = axios.create({
-      baseURL: 'https://api.klingai.com',
+      baseURL: baseURLs[0], // Start with the first one
       timeout: 60000,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.accessKey}`,
+        'X-API-Key': this.accessKey,
       },
     });
 
@@ -62,10 +70,17 @@ export class KlingAiService {
         return response;
       },
       (error) => {
-        this.logger.error(
-          'Kling AI API Error:',
-          error.response?.status || error.message,
-        );
+        this.logger.error('Kling AI API Error Details:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          headers: error.response?.headers,
+          config: {
+            url: error.config?.url,
+            method: error.config?.method,
+            headers: error.config?.headers,
+          },
+        });
         return Promise.reject(error);
       },
     );
@@ -77,16 +92,17 @@ export class KlingAiService {
         `Starting video generation with prompt: "${request.prompt}"`,
       );
 
-      // Map our parameters to Kling AI format
+      // Map our parameters to Kling AI format - try different variations
       const klingRequest = {
-        model: this.getKlingModel(request.quality),
         prompt: request.prompt,
         negative_prompt: '',
         aspect_ratio: request.aspectRatio,
         duration: request.duration,
+        model_name: this.getKlingModel(request.quality),
+        cfg_scale: 0.5,
         ...(request.images &&
           request.images.length > 0 && {
-            image: request.images[0],
+            image_url: request.images[0],
           }),
       };
 
@@ -95,11 +111,34 @@ export class KlingAiService {
         JSON.stringify(klingRequest, null, 2),
       );
 
-      // Make the API call to Kling AI
-      const response = await this.httpClient.post(
+      // Try different endpoints
+      const endpoints = [
         '/v1/videos/text2video',
-        klingRequest,
-      );
+        '/v1/videos/generations',
+        '/api/v1/videos/text2video',
+      ];
+      let response;
+      let lastError;
+
+      for (const endpoint of endpoints) {
+        try {
+          this.logger.log(`Trying endpoint: ${endpoint}`);
+          response = await this.httpClient.post(endpoint, klingRequest);
+          this.logger.log(`Success with endpoint: ${endpoint}`);
+          break;
+        } catch (error) {
+          this.logger.warn(
+            `Failed with endpoint ${endpoint}:`,
+            error.response?.status,
+          );
+          lastError = error;
+          continue;
+        }
+      }
+
+      if (!response) {
+        throw lastError;
+      }
 
       this.logger.log(
         'Kling AI response:',
