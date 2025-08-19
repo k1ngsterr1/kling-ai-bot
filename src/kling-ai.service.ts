@@ -101,6 +101,7 @@ export class KlingAiService {
 
       // Map our parameters to Kling AI format according to documentation
       const klingRequest = {
+        model: this.getKlingModel(request.quality),
         prompt: request.prompt,
         negative_prompt: '',
         aspect_ratio: request.aspectRatio,
@@ -132,7 +133,9 @@ export class KlingAiService {
           response.data.data?.task_id ||
           response.data.id ||
           this.generateMockId(),
-        status: 'pending',
+        status: this.mapKlingStatus(
+          response.data.data?.task_status || 'pending',
+        ),
         estimatedTime: this.getEstimatedTime(request.quality),
       };
 
