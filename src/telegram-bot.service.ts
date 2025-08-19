@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot = require('node-telegram-bot-api');
+import { KlingAiService, KlingVideoRequest } from './kling-ai.service';
 
 @Injectable()
 export class TelegramBotService {
@@ -8,7 +9,10 @@ export class TelegramBotService {
   private bot: TelegramBot;
   private userStates: Map<number, { state: string; data?: any }> = new Map();
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private klingAiService: KlingAiService,
+  ) {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     if (!token) {
       throw new Error('TELEGRAM_BOT_TOKEN is not defined');
@@ -257,6 +261,18 @@ export class TelegramBotService {
       case 'change_duration':
         this.handleDurationSelection(chatId);
         break;
+      case 'aspect_1_1':
+        this.handleAspectRatioChoice(chatId, '1:1');
+        break;
+      case 'aspect_9_16':
+        this.handleAspectRatioChoice(chatId, '9:16');
+        break;
+      case 'aspect_16_9':
+        this.handleAspectRatioChoice(chatId, '16:9');
+        break;
+      case 'change_aspect_ratio':
+        this.handleAspectRatioSelection(chatId);
+        break;
       case 'confirm_generation':
         this.handleGenerationConfirmation(chatId);
         break;
@@ -397,59 +413,43 @@ export class TelegramBotService {
       return;
     }
 
-    const { prompt, images = [], quality } = userState.data;
-
     // Save the selected duration
     this.userStates.set(chatId, {
       ...userState,
       data: { ...userState.data, duration },
     });
 
-    const qualityNames = {
-      standard: '⚡ STANDARD',
-      pro: '🎓 PRO',
-      master: '💎 MASTER',
-    };
+    // Show aspect ratio selection
+    this.handleAspectRatioSelection(chatId);
+  }
 
-    const totalCost = duration === 5 ? 4 : 8; // 4 tokens for 5s, 8 tokens for 10s
+  private handleAspectRatioSelection(chatId: number) {
+    const aspectRatioText = `
+📐 Выберите формат видео:
 
-    const confirmationText = `
-✅ Настройки генерации:
+▫️ [1:1] Квадрат  
+   ─ Идеален для постов Instagram, Facebook
 
-📝 Промпт: "${prompt}"
-📸 Изображений: ${images.length}/2
-🎚️ Качество: ${qualityNames[quality]}
-⏱️ Длительность: ${duration} секунд
-💰 Общая стоимость: ${totalCost} токенов
+▫️ [9:16] Вертикальный  
+   ─ Для TikTok, Reels, Stories
 
-⚠️ После подтверждения токены будут списаны с баланса.
-
-Подтвердить генерацию?
+▫️ [16:9] Широкоэкранный  
+   ─ Для YouTube, компьютеров, телевизоров
     `;
 
     const keyboard = {
       inline_keyboard: [
-        [
-          {
-            text: '✅ Подтвердить генерацию',
-            callback_data: 'confirm_generation',
-          },
-        ],
-        [
-          {
-            text: '🔙 Изменить длительность',
-            callback_data: 'change_duration',
-          },
-        ],
-        [{ text: '⚙️ Изменить качество', callback_data: 'video_settings' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main' }],
+        [{ text: '[1:1 📱]', callback_data: 'aspect_1_1' }],
+        [{ text: '[9:16 �]', callback_data: 'aspect_9_16' }],
+        [{ text: '[16:9 📺]', callback_data: 'aspect_16_9' }],
+        [{ text: '[Назад]', callback_data: 'change_duration' }],
       ],
     };
 
-    this.bot.sendMessage(chatId, confirmationText, { reply_markup: keyboard });
+    this.bot.sendMessage(chatId, aspectRatioText, { reply_markup: keyboard });
   }
 
-  private handleGenerationConfirmation(chatId: number) {
+  private handleAspectRatioChoice(chatId: number, aspectRatio: string) {
     const userState = this.userStates.get(chatId);
 
     if (!userState?.data) {
@@ -462,8 +462,11 @@ export class TelegramBotService {
 
     const { prompt, images = [], quality, duration } = userState.data;
 
-    // Clear user state as generation is starting
-    this.userStates.delete(chatId);
+    // Save the selected aspect ratio
+    this.userStates.set(chatId, {
+      ...userState,
+      data: { ...userState.data, aspectRatio },
+    });
 
     const qualityNames = {
       standard: '⚡ STANDARD',
@@ -471,44 +474,231 @@ export class TelegramBotService {
       master: '💎 MASTER',
     };
 
+    const aspectRatioNames = {
+      '1:1': '[1:1] Квадрат',
+      '9:16': '[9:16] Вертикальный',
+      '16:9': '[16:9] Широкоэкранный',
+    };
+
     const totalCost = duration === 5 ? 4 : 8;
 
-    const generationText = `
-🎬 Генерация видео запущена!
+    const confirmationText = `
+3.4 Пользователь выбрал формат видео
+✅ Ваш заказ:
+Модель: V2.1 ${qualityNames[quality]}
+Длительность: ${duration}s
+Промпт: "${prompt}"
+Стоимость: ${totalCost} токенов
+Текущий баланс: 100 токенов
 
-📝 Промпт: "${prompt}"
-📸 Изображений: ${images.length}/2
-🎚️ Качество: ${qualityNames[quality]}
-⏱️ Длительность: ${duration} секунд
-💰 Списано: ${totalCost} токенов
-
-⏳ Ожидайте... Это может занять несколько минут.
-Мы уведомим вас, когда видео будет готово.
     `;
 
     const keyboard = {
-      inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main' }]],
+      inline_keyboard: [
+        [
+          {
+            text: '⚡ Начать генерацию',
+            callback_data: 'confirm_generation',
+          },
+        ],
+        [{ text: '[Назад]', callback_data: 'change_aspect_ratio' }],
+      ],
     };
 
-    this.bot.sendMessage(chatId, generationText, { reply_markup: keyboard });
+    this.bot.sendMessage(chatId, confirmationText, { reply_markup: keyboard });
+  }
 
-    // Here you would integrate with the actual Kling AI API
-    // For now, just simulate the process
-    setTimeout(() => {
+  private async handleGenerationConfirmation(chatId: number) {
+    const userState = this.userStates.get(chatId);
+
+    if (!userState?.data) {
       this.bot.sendMessage(
         chatId,
-        '🎉 Генерация завершена! К сожалению, интеграция с Kling AI API еще в разработке.\n\n' +
-          'В реальной версии здесь будет ваше сгенерированное видео.',
+        'Ошибка: данные не найдены. Начните заново с /video',
+      );
+      return;
+    }
+
+    const {
+      prompt,
+      images = [],
+      quality,
+      duration,
+      aspectRatio,
+    } = userState.data;
+
+    try {
+      // Create Kling AI request
+      const klingRequest: KlingVideoRequest = {
+        prompt,
+        quality: quality as 'standard' | 'pro' | 'master',
+        duration: duration as 5 | 10,
+        aspectRatio: aspectRatio as '1:1' | '9:16' | '16:9',
+        images: images.map((img) => img.file_id),
+      };
+
+      // Start generation with Kling AI
+      const generationResult =
+        await this.klingAiService.generateVideo(klingRequest);
+
+      const totalCost = duration === 5 ? 4 : 8;
+      const estimatedMinutes = Math.ceil(
+        (generationResult.estimatedTime || 180) / 60,
+      );
+
+      const generationText = `
+3.5 Пользователь Нажал кнопку [⚡ Начать генерацию]
+⏳ Генерация начата!
+ID: #${generationResult.id}
+Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
+Текущий статус: [██████▒▒▒▒▒▒▒▒▒ 20%]
+
+🔔 Мы пришлем результат сразу как он будет готов
+      `;
+
+      const keyboard = {
+        inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main' }]],
+      };
+
+      await this.bot.sendMessage(chatId, generationText, {
+        reply_markup: keyboard,
+      });
+
+      // Clear user state as generation is started
+      this.userStates.delete(chatId);
+
+      // Start polling for video status
+      this.pollVideoStatus(chatId, generationResult.id, totalCost);
+    } catch (error) {
+      this.logger.error('Error starting video generation:', error);
+      this.bot.sendMessage(
+        chatId,
+        '❌ Ошибка при запуске генерации. Попробуйте еще раз.',
         {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
+              [{ text: '🔄 Попробовать снова', callback_data: 'video' }],
               [{ text: '🏠 Главное меню', callback_data: 'main' }],
             ],
           },
         },
       );
-    }, 3000); // Simulate 3 second delay
+    }
+  }
+
+  private async pollVideoStatus(chatId: number, videoId: string, cost: number) {
+    const maxAttempts = 30; // Poll for up to 15 minutes (30 * 30 seconds)
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+
+      try {
+        const status = await this.klingAiService.getVideoStatus(videoId);
+
+        if (status.status === 'completed' && status.videoUrl) {
+          // Video is ready
+          await this.bot.sendMessage(
+            chatId,
+            `
+🎉 Ваше видео готово!
+
+ID: #${videoId}
+💰 Списано: ${cost} токенов
+📱 Скачать: ${status.videoUrl}
+
+Спасибо за использование нашего сервиса!
+          `,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+
+          // Try to send the video directly if it's accessible
+          try {
+            await this.bot.sendVideo(chatId, status.videoUrl, {
+              caption: `Видео #${videoId} | Стоимость: ${cost} токенов`,
+            });
+          } catch (videoError) {
+            this.logger.warn('Could not send video directly:', videoError);
+          }
+
+          return;
+        } else if (status.status === 'failed') {
+          // Generation failed
+          await this.bot.sendMessage(
+            chatId,
+            `
+❌ Генерация видео не удалась
+
+ID: #${videoId}
+Возможные причины:
+• Некорректный промпт
+• Технические проблемы
+• Превышен лимит времени
+
+💰 Токены возвращены на ваш баланс.
+          `,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Попробовать снова', callback_data: 'video' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+          return;
+        } else if (attempts >= maxAttempts) {
+          // Timeout
+          await this.bot.sendMessage(
+            chatId,
+            `
+⏰ Превышено время ожидания
+
+ID: #${videoId}
+Генерация может все еще продолжаться.
+Проверьте результат позже или обратитесь в поддержку.
+          `,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+          return;
+        }
+
+        // Continue polling
+        setTimeout(poll, 30000); // Poll every 30 seconds
+      } catch (error) {
+        this.logger.error(`Error polling video status for ${videoId}:`, error);
+
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 30000);
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            `
+❌ Ошибка проверки статуса видео
+
+ID: #${videoId}
+Обратитесь в поддержку для получения результата.
+          `,
+          );
+        }
+      }
+    };
+
+    // Start polling after initial delay
+    setTimeout(poll, 30000);
   }
 
   private handleTextMessage(msg: TelegramBot.Message) {
