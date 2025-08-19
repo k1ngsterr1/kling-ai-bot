@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
+import * as crypto from 'crypto';
 
 export interface KlingVideoRequest {
   prompt: string;
@@ -33,18 +34,27 @@ export class KlingAiService {
       'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
 
     this.httpClient = axios.create({
-      baseURL: 'https://api.kling.ai/v1', // Replace with actual Kling AI API base URL
+      baseURL: 'https://api.klingai.com',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.accessKey}`, // This might need to be different based on Kling AI docs
-        'X-Secret-Key': this.secretKey,
       },
     });
 
-    // Add request interceptor for minimal logging
+    // Add request interceptor to add authentication
     this.httpClient.interceptors.request.use(
       (config) => {
+        const timestamp = Date.now().toString();
+        const signature = this.generateSignature(
+          config.method || 'GET',
+          config.url || '',
+          timestamp,
+          config.data,
+        );
+
+        config.headers['Authorization'] =
+          `KLING-HMAC-SHA256 AccessKey=${this.accessKey}, Signature=${signature}, Timestamp=${timestamp}`;
+
         this.logger.debug(
           `Kling AI Request: ${config.method?.toUpperCase()} ${config.url}`,
         );
@@ -72,6 +82,21 @@ export class KlingAiService {
     );
   }
 
+  private generateSignature(
+    method: string,
+    url: string,
+    timestamp: string,
+    body?: any,
+  ): string {
+    const bodyString = body ? JSON.stringify(body) : '';
+    const stringToSign = `${method.toUpperCase()}\n${url}\n${timestamp}\n${bodyString}`;
+
+    return crypto
+      .createHmac('sha256', this.secretKey)
+      .update(stringToSign)
+      .digest('hex');
+  }
+
   async generateVideo(request: KlingVideoRequest): Promise<KlingVideoResponse> {
     try {
       this.logger.log(
@@ -80,20 +105,32 @@ export class KlingAiService {
 
       // Map our parameters to Kling AI format
       const klingRequest = {
+        model_name: this.getKlingModel(request.quality),
         prompt: request.prompt,
-        model: this.getKlingModel(request.quality),
-        duration: request.duration,
+        negative_prompt: '',
+        cfg_scale: 0.5,
+        mode: 'std',
+        duration: request.duration.toString(),
         aspect_ratio: request.aspectRatio,
-        images: request.images || [],
+        ...(request.images &&
+          request.images.length > 0 && {
+            image: request.images[0], // First image as reference
+          }),
+        ...(request.images &&
+          request.images.length > 1 && {
+            tail_image: request.images[1], // Second image if provided
+          }),
       };
 
       // Make the API call to Kling AI
-      // Note: Replace '/generate' with the actual Kling AI endpoint
-      const response = await this.httpClient.post('/generate', klingRequest);
+      const response = await this.httpClient.post(
+        '/v1/videos/text2video',
+        klingRequest,
+      );
 
       const result: KlingVideoResponse = {
-        id: response.data.id || this.generateMockId(),
-        status: response.data.status || 'pending',
+        id: response.data.data.task_id,
+        status: 'pending',
         estimatedTime: this.getEstimatedTime(request.quality),
       };
 
@@ -119,12 +156,15 @@ export class KlingAiService {
       this.logger.log(`Checking status for video ID: ${videoId}`);
 
       // Note: Replace '/status' with the actual Kling AI endpoint
-      const response = await this.httpClient.get(`/status/${videoId}`);
+      const response = await this.httpClient.get(`/v1/videos/${videoId}`);
 
       const result: KlingVideoResponse = {
         id: videoId,
-        status: response.data.status,
-        videoUrl: response.data.video_url,
+        status: this.mapKlingStatus(response.data.data.task_status),
+        videoUrl:
+          response.data.data.task_status === 'succeed'
+            ? response.data.data.works[0]?.resource.resource
+            : undefined,
       };
 
       this.logger.log(`Video ${videoId} status: ${result.status}`);
@@ -146,11 +186,23 @@ export class KlingAiService {
 
   private getKlingModel(quality: string): string {
     const modelMap = {
-      standard: 'kling-v2.1-standard',
-      pro: 'kling-v2.1-pro',
-      master: 'kling-v2.1-master',
+      standard: 'kling-v-1',
+      pro: 'kling-v-1',
+      master: 'kling-v-1-5',
     };
     return modelMap[quality] || modelMap.standard;
+  }
+
+  private mapKlingStatus(
+    klingStatus: string,
+  ): 'pending' | 'processing' | 'completed' | 'failed' {
+    const statusMap = {
+      submitted: 'pending',
+      processing: 'processing',
+      succeed: 'completed',
+      failed: 'failed',
+    };
+    return statusMap[klingStatus] || 'processing';
   }
 
   private getEstimatedTime(quality: string): number {
