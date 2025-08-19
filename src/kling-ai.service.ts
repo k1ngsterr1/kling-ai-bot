@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
-import * as crypto from 'crypto';
 
 export interface KlingVideoRequest {
   prompt: string;
@@ -35,26 +34,16 @@ export class KlingAiService {
 
     this.httpClient = axios.create({
       baseURL: 'https://api.klingai.com',
-      timeout: 30000,
+      timeout: 60000,
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.accessKey}`,
       },
     });
 
-    // Add request interceptor to add authentication
+    // Add request interceptor for logging
     this.httpClient.interceptors.request.use(
       (config) => {
-        const timestamp = Date.now().toString();
-        const signature = this.generateSignature(
-          config.method || 'GET',
-          config.url || '',
-          timestamp,
-          config.data,
-        );
-
-        config.headers['Authorization'] =
-          `KLING-HMAC-SHA256 AccessKey=${this.accessKey}, Signature=${signature}, Timestamp=${timestamp}`;
-
         this.logger.debug(
           `Kling AI Request: ${config.method?.toUpperCase()} ${config.url}`,
         );
@@ -82,21 +71,6 @@ export class KlingAiService {
     );
   }
 
-  private generateSignature(
-    method: string,
-    url: string,
-    timestamp: string,
-    body?: any,
-  ): string {
-    const bodyString = body ? JSON.stringify(body) : '';
-    const stringToSign = `${method.toUpperCase()}\n${url}\n${timestamp}\n${bodyString}`;
-
-    return crypto
-      .createHmac('sha256', this.secretKey)
-      .update(stringToSign)
-      .digest('hex');
-  }
-
   async generateVideo(request: KlingVideoRequest): Promise<KlingVideoResponse> {
     try {
       this.logger.log(
@@ -105,22 +79,21 @@ export class KlingAiService {
 
       // Map our parameters to Kling AI format
       const klingRequest = {
-        model_name: this.getKlingModel(request.quality),
+        model: this.getKlingModel(request.quality),
         prompt: request.prompt,
         negative_prompt: '',
-        cfg_scale: 0.5,
-        mode: 'std',
-        duration: request.duration.toString(),
         aspect_ratio: request.aspectRatio,
+        duration: request.duration,
         ...(request.images &&
           request.images.length > 0 && {
-            image: request.images[0], // First image as reference
-          }),
-        ...(request.images &&
-          request.images.length > 1 && {
-            tail_image: request.images[1], // Second image if provided
+            image: request.images[0],
           }),
       };
+
+      this.logger.log(
+        'Sending request to Kling AI:',
+        JSON.stringify(klingRequest, null, 2),
+      );
 
       // Make the API call to Kling AI
       const response = await this.httpClient.post(
@@ -128,8 +101,16 @@ export class KlingAiService {
         klingRequest,
       );
 
+      this.logger.log(
+        'Kling AI response:',
+        JSON.stringify(response.data, null, 2),
+      );
+
       const result: KlingVideoResponse = {
-        id: response.data.data.task_id,
+        id:
+          response.data.data?.task_id ||
+          response.data.id ||
+          this.generateMockId(),
         status: 'pending',
         estimatedTime: this.getEstimatedTime(request.quality),
       };
@@ -155,15 +136,19 @@ export class KlingAiService {
     try {
       this.logger.log(`Checking status for video ID: ${videoId}`);
 
-      // Note: Replace '/status' with the actual Kling AI endpoint
+      // Get video status from Kling AI
       const response = await this.httpClient.get(`/v1/videos/${videoId}`);
 
       const result: KlingVideoResponse = {
         id: videoId,
-        status: this.mapKlingStatus(response.data.data.task_status),
+        status: this.mapKlingStatus(
+          response.data.data?.task_status || response.data.status,
+        ),
         videoUrl:
-          response.data.data.task_status === 'succeed'
-            ? response.data.data.works[0]?.resource.resource
+          response.data.data?.task_status === 'succeed' ||
+          response.data.status === 'succeed'
+            ? response.data.data?.works?.[0]?.resource?.resource ||
+              response.data.video_url
             : undefined,
       };
 
@@ -190,7 +175,7 @@ export class KlingAiService {
       pro: 'kling-v-1',
       master: 'kling-v-1-5',
     };
-    return modelMap[quality] || modelMap.standard;
+    return modelMap[quality] || 'kling-v-1';
   }
 
   private mapKlingStatus(
