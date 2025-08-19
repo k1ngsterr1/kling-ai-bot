@@ -160,23 +160,39 @@ export class KlingAiService {
     try {
       this.logger.log(`Checking status for video ID: ${videoId}`);
 
-      // Get video status from Kling AI
-      const response = await this.httpClient.get(`/v1/videos/${videoId}`);
+      // Get list of all videos and find our task
+      const response = await this.httpClient.get('/v1/videos/text2video', {
+        params: {
+          task_id: videoId,
+        },
+      });
+
+      // Find the specific task in the response array
+      const tasks = response.data.data || [];
+      const task = tasks.find((t) => t.task_id === videoId);
+
+      if (!task) {
+        this.logger.warn(`Task ${videoId} not found in response`);
+        return {
+          id: videoId,
+          status: 'failed',
+        };
+      }
 
       const result: KlingVideoResponse = {
         id: videoId,
-        status: this.mapKlingStatus(
-          response.data.data?.task_status || response.data.status,
-        ),
+        status: this.mapKlingStatus(task.task_status),
         videoUrl:
-          response.data.data?.task_status === 'succeed' ||
-          response.data.status === 'succeed'
-            ? response.data.data?.works?.[0]?.resource?.resource ||
-              response.data.video_url
+          task.task_status === 'succeed' && task.task_result?.videos?.length > 0
+            ? task.task_result.videos[0].url
             : undefined,
       };
 
       this.logger.log(`Video ${videoId} status: ${result.status}`);
+      if (result.videoUrl) {
+        this.logger.log(`Video URL: ${result.videoUrl}`);
+      }
+
       return result;
     } catch (error) {
       this.logger.error(`Error checking video status for ${videoId}:`, error);

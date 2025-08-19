@@ -65,15 +65,15 @@ async function testKlingAI() {
 
       // Test different status endpoints
       console.log('\n🔍 Testing different status check endpoints...');
-      
+
       const statusEndpoints = [
         `/v1/videos/text2video/${response.data.data.task_id}`,
         `/v1/videos/status/${response.data.data.task_id}`,
         `/v1/tasks/${response.data.data.task_id}`,
         `/v1/videos/query/${response.data.data.task_id}`,
-        `/v1/videos/text2video/status/${response.data.data.task_id}`
+        `/v1/videos/text2video/status/${response.data.data.task_id}`,
       ];
-      
+
       let statusFound = false;
       for (const endpoint of statusEndpoints) {
         try {
@@ -82,27 +82,37 @@ async function testKlingAI() {
           const freshToken = generateJwtToken(accessKey, secretKey);
           const statusResponse = await axios.get(`${baseURL}${endpoint}`, {
             headers: {
-              'Authorization': `Bearer ${freshToken}`,
-              'Content-Type': 'application/json'
-            }
+              Authorization: `Bearer ${freshToken}`,
+              'Content-Type': 'application/json',
+            },
           });
-          
+
           console.log('✅ SUCCESS! Status check response:');
           console.log('Status:', statusResponse.status);
-          console.log('Response data:', JSON.stringify(statusResponse.data, null, 2));
+          console.log(
+            'Response data:',
+            JSON.stringify(statusResponse.data, null, 2),
+          );
           statusFound = true;
           break;
-          
         } catch (statusError) {
-          console.log(`❌ ERROR for ${endpoint}:`, statusError.response?.status || statusError.message);
+          console.log(
+            `❌ ERROR for ${endpoint}:`,
+            statusError.response?.status || statusError.message,
+          );
           if (statusError.response?.data) {
-            console.log('Error data:', JSON.stringify(statusError.response.data, null, 2));
+            console.log(
+              'Error data:',
+              JSON.stringify(statusError.response.data, null, 2),
+            );
           }
         }
       }
-      
+
       if (!statusFound) {
-        console.log('\n⚠️ No working status endpoint found, but video generation was successful!');
+        console.log(
+          '\n⚠️ No working status endpoint found, but video generation was successful!',
+        );
       }
     }
   } catch (error) {
