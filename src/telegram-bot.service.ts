@@ -79,6 +79,11 @@ export class TelegramBotService {
       this.handlePhotoMessage(msg);
     });
 
+    // Handle document messages
+    this.bot.on('document', (msg) => {
+      this.handleDocumentMessage(msg);
+    });
+
     this.bot.on('polling_error', (error) => {
       this.logger.error('Telegram bot polling error:', error);
     });
@@ -207,20 +212,30 @@ export class TelegramBotService {
     const keyboard = {
       inline_keyboard: [
         [
-          { text: '🔒 Политика конфиденциальности', url: 'https://teletype.in/@help_24/privacy_kling' }
+          {
+            text: '🔒 Политика конфиденциальности',
+            url: 'https://teletype.in/@help_24/privacy_kling',
+          },
         ],
         [
-          { text: '📜 Пользовательское соглашение', url: 'https://teletype.in/@help_24/agree_kling' }
+          {
+            text: '📜 Пользовательское соглашение',
+            url: 'https://teletype.in/@help_24/agree_kling',
+          },
         ],
         [
-          { text: '💎 Оферта', url: 'https://teletype.in/@help_24/oferta_kling' }
+          {
+            text: '💎 Оферта',
+            url: 'https://teletype.in/@help_24/oferta_kling',
+          },
         ],
         [
-          { text: '📖 Подробные условия', url: 'https://teletype.in/@help_24/podrobno_kling' }
+          {
+            text: '📖 Подробные условия',
+            url: 'https://teletype.in/@help_24/podrobno_kling',
+          },
         ],
-        [
-          { text: '🏠 Главное меню', callback_data: 'main' }
-        ]
+        [{ text: '🏠 Главное меню', callback_data: 'main' }],
       ],
     };
 
@@ -831,6 +846,116 @@ ${
 
         this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
       }
+    } else {
+      this.bot.sendMessage(
+        chatId,
+        'Для добавления изображений сначала выберите "🎬 Видео" и введите описание.',
+      );
+    }
+  }
+
+  private handleDocumentMessage(msg: TelegramBot.Message) {
+    const chatId = msg.chat.id;
+    const document = msg.document;
+
+    if (!document) return;
+
+    // Check if it's an unsupported file format
+    const supportedFormats = ['jpg', 'jpeg', 'png'];
+    const fileExtension = document.file_name?.split('.').pop()?.toLowerCase();
+    const maxSizeMB = 20;
+    const fileSizeMB = (document.file_size || 0) / (1024 * 1024);
+
+    if (!fileExtension || !supportedFormats.includes(fileExtension)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Неподдерживаемый формат файла. Требуется: Jpg/PNG до 20 МБ',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
+            ],
+          },
+        },
+      );
+      return;
+    }
+
+    if (fileSizeMB > maxSizeMB) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Неподдерживаемый формат файла. Требуется: Jpg/PNG до 20 МБ',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
+            ],
+          },
+        },
+      );
+      return;
+    }
+
+    // If format and size are valid, treat as image for video generation
+    const userState = this.userStates.get(chatId);
+
+    if (userState?.state === 'video_prompt_received') {
+      const currentImages = userState.data?.images || [];
+
+      if (currentImages.length >= 2) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Максимум 2 изображения для генерации видео.',
+        );
+        return;
+      }
+
+      // Add the document as an image
+      const updatedImages = [
+        ...currentImages,
+        {
+          file_id: document.file_id,
+          file_unique_id: document.file_unique_id,
+        },
+      ];
+
+      this.userStates.set(chatId, {
+        ...userState,
+        data: { ...userState.data, images: updatedImages },
+      });
+
+      const responseText = `
+✅ Изображение добавлено! ${
+        updatedImages.length >= 2
+          ? 'Достигнут максимум (2/2)'
+          : `Можете добавить еще ${2 - updatedImages.length} изображение`
+      }
+
+Промпт: "${userState.data?.prompt}"
+Изображений: ${updatedImages.length}/2
+
+Готовы к генерации?
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: '⚙️ Настройки генерации',
+              callback_data: 'video_settings',
+            },
+          ],
+          [
+            {
+              text: '🗑️ Очистить изображения',
+              callback_data: 'clear_images',
+            },
+            { text: '🏠 Главное меню', callback_data: 'main' },
+          ],
+        ],
+      };
+
+      this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
     } else {
       this.bot.sendMessage(
         chatId,
