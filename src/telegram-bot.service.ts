@@ -177,18 +177,50 @@ export class TelegramBotService {
 
   private handleBalanceCommand(chatId: number) {
     const balanceText = `
-💳 Баланс - управление счетом и подпиской
+� ВАШ ТЕКУЩИЙ БАЛАНС
 
-Ваш текущий статус:
-• Баланс: 0 токенов
-• Подписка: Не активна
-• Лимиты: 5 запросов в день (бесплатно)
+🎬 Видео-токены: 0
+📸 img-токены: 0
 
-Для пополнения баланса или оформления подписки обратитесь к администратору.
+⚠️ Подписка не активна /Подписка активна до XX.XX.XXXX
+
+🔥 ВЫГОДНЫЕ ПОДПИСКИ (ежемесячное автопополнение)
+
+[💎 СТАРТ] 25 видео + 100 изо • 1200 ₽/мес
+▸ Базовый пакет • идеален для тестирования
+▸ Автопродление • отмена в любой момент
+
+[💎 ПРОДВИНУТЫЙ] 50 видео + 100 изо • 2230 ₽/мес
+▸ ~~2400₽~~ • экономия 170₽ (7%)
+▸ Самый популярный вариант
+
+[💎 ПРОФИ] 100 видео + 200 изо • 4320 ₽/мес
+▸ ~~4800₽~~ • экономия 480₽ (10%)
+▸ Приоритетная очередь
+
+[💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ]
+Покупай генерации, без подписок и ограничений.
     `;
 
     const keyboard = {
-      inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main' }]],
+      inline_keyboard: [
+        [
+          { text: '💎 СТАРТ', callback_data: 'subscription_start' },
+        ],
+        [
+          { text: '💎 ПРОДВИНУТЫЙ', callback_data: 'subscription_advanced' },
+        ],
+        [
+          { text: '💎 ПРОФИ', callback_data: 'subscription_pro' },
+        ],
+        [
+          { text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ', callback_data: 'additional_packages' },
+        ],
+        [
+          { text: 'Отменить подписку', callback_data: 'cancel_subscription' },
+          { text: 'Назад', callback_data: 'main' }
+        ]
+      ],
     };
 
     this.bot.sendMessage(chatId, balanceText, { reply_markup: keyboard });
@@ -306,6 +338,21 @@ export class TelegramBotService {
         break;
       case 'confirm_generation':
         this.handleGenerationConfirmation(chatId);
+        break;
+      case 'subscription_start':
+        this.handleSubscriptionPlan(chatId, 'start');
+        break;
+      case 'subscription_advanced':
+        this.handleSubscriptionPlan(chatId, 'advanced');
+        break;
+      case 'subscription_pro':
+        this.handleSubscriptionPlan(chatId, 'pro');
+        break;
+      case 'additional_packages':
+        this.handleAdditionalPackages(chatId);
+        break;
+      case 'cancel_subscription':
+        this.handleCancelSubscription(chatId);
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
@@ -1081,5 +1128,137 @@ ${
     const empty = '▒'.repeat(emptyBlocks);
 
     return `[${filled}${empty}`;
+  }
+
+  private handleSubscriptionPlan(chatId: number, plan: 'start' | 'advanced' | 'pro') {
+    const plans = {
+      start: {
+        name: '💎 СТАРТ',
+        videos: 25,
+        images: 100,
+        price: 1200,
+        description: 'Базовый пакет • идеален для тестирования',
+        oldPrice: undefined as number | undefined
+      },
+      advanced: {
+        name: '💎 ПРОДВИНУТЫЙ',
+        videos: 50,
+        images: 100,
+        price: 2230,
+        oldPrice: 2400,
+        description: 'Самый популярный вариант'
+      },
+      pro: {
+        name: '💎 ПРОФИ',
+        videos: 100,
+        images: 200,
+        price: 4320,
+        oldPrice: 4800,
+        description: 'Приоритетная очередь'
+      }
+    };
+
+    const selectedPlan = plans[plan];
+    const savingsText = selectedPlan.oldPrice ? 
+      `\n💰 Экономия: ${selectedPlan.oldPrice - selectedPlan.price}₽` : '';
+
+    const text = `
+${selectedPlan.name}
+
+📦 Включает:
+• ${selectedPlan.videos} видео генераций
+• ${selectedPlan.images} изображений
+• ${selectedPlan.description}
+• Автопродление (отмена в любой момент)
+
+💵 Стоимость: ${selectedPlan.price}₽/мес${savingsText}
+
+Для оформления подписки обратитесь к администратору.
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '💳 Оформить подписку', callback_data: `purchase_${plan}` }
+        ],
+        [
+          { text: '◀️ Назад к тарифам', callback_data: 'balance' },
+          { text: '🏠 Главное меню', callback_data: 'main' }
+        ]
+      ]
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleAdditionalPackages(chatId: number) {
+    const text = `
+💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ
+
+Покупай генерации без подписок и ограничений:
+
+🎬 Видео пакеты:
+• 10 видео - 500₽
+• 25 видео - 1100₽  
+• 50 видео - 2000₽
+• 100 видео - 3800₽
+
+📸 Изображения:
+• 50 изо - 200₽
+• 100 изо - 350₽
+• 200 изо - 600₽
+• 500 изо - 1400₽
+
+✨ Преимущества:
+• Токены не сгорают
+• Без ежемесячных списаний
+• Используй когда удобно
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '🎬 Купить видео пакет', callback_data: 'buy_video_package' }
+        ],
+        [
+          { text: '📸 Купить изображения', callback_data: 'buy_image_package' }
+        ],
+        [
+          { text: '◀️ Назад', callback_data: 'balance' },
+          { text: '🏠 Главное меню', callback_data: 'main' }
+        ]
+      ]
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleCancelSubscription(chatId: number) {
+    const text = `
+❌ Отмена подписки
+
+Вы действительно хотите отменить подписку?
+
+⚠️ После отмены:
+• Автопродление будет остановлено
+• Доступ к функциям сохранится до конца оплаченного периода
+• Неиспользованные токены останутся на балансе
+
+Отменить подписку можно в любой момент без штрафов.
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ Да, отменить подписку', callback_data: 'confirm_cancel_subscription' }
+        ],
+        [
+          { text: '◀️ Назад', callback_data: 'balance' },
+          { text: '🏠 Главное меню', callback_data: 'main' }
+        ]
+      ]
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
   }
 }
