@@ -82,14 +82,28 @@ export class KlingAiService {
       typ: 'JWT',
     };
 
+    const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: this.accessKey,
-      exp: Math.floor(Date.now() / 1000) + 1800, // Current time + 30 minutes
-      nbf: Math.floor(Date.now() / 1000) - 5, // Current time - 5 seconds
+      exp: now + 1800, // Current time + 30 minutes
+      nbf: now - 5, // Current time - 5 seconds
     };
 
-    const token = jwt.sign(payload, this.secretKey, { header: headers });
-    this.logger.debug('Generated JWT token for Kling AI API');
+    this.logger.debug('JWT Payload:', {
+      iss: this.accessKey,
+      exp: payload.exp,
+      nbf: payload.nbf,
+      currentTime: now,
+      validFor: '30 minutes',
+    });
+
+    const token = jwt.sign(payload, this.secretKey, { algorithm: 'HS256' });
+
+    this.logger.debug(
+      'Generated JWT token (first 20 chars):',
+      token.substring(0, 20) + '...',
+    );
+
     return token;
   }
 
@@ -124,8 +138,16 @@ export class KlingAiService {
       );
 
       this.logger.log(
-        'Kling AI response:',
-        JSON.stringify(response.data, null, 2),
+        'Kling AI Generate Response:',
+        JSON.stringify(
+          {
+            status: response.status,
+            statusText: response.statusText,
+            data: response.data,
+          },
+          null,
+          2,
+        ),
       );
 
       const result: KlingVideoResponse = {
@@ -139,10 +161,24 @@ export class KlingAiService {
         estimatedTime: this.getEstimatedTime(request.quality),
       };
 
-      this.logger.log(`Video generation started with ID: ${result.id}`);
+      this.logger.log(
+        `Video generation started with ID: ${result.id}, status: ${result.status} (raw: ${response.data.data?.task_status})`,
+      );
       return result;
     } catch (error) {
       this.logger.error('Error generating video:', error);
+
+      if (error.response) {
+        this.logger.error('API Response Error:', {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+        });
+      }
+
+      if (error.request) {
+        this.logger.error('API Request Error:', error.request);
+      }
 
       // For development, return a mock response when API fails
       const mockResponse: KlingVideoResponse = {
@@ -167,17 +203,35 @@ export class KlingAiService {
         },
       });
 
+      this.logger.debug(`Kling AI Status Response:`, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        data: JSON.stringify(response.data, null, 2),
+      });
+
       // Find the specific task in the response array
       const tasks = response.data.data || [];
+      this.logger.debug(`Found ${tasks.length} tasks in response`);
+
       const task = tasks.find((t) => t.task_id === videoId);
 
       if (!task) {
         this.logger.warn(`Task ${videoId} not found in response`);
+        this.logger.debug(
+          `Available task IDs:`,
+          tasks.map((t) => t.task_id),
+        );
         return {
           id: videoId,
           status: 'failed',
         };
       }
+
+      this.logger.debug(
+        `Task details for ${videoId}:`,
+        JSON.stringify(task, null, 2),
+      );
 
       const result: KlingVideoResponse = {
         id: videoId,
@@ -188,7 +242,15 @@ export class KlingAiService {
             : undefined,
       };
 
-      this.logger.log(`Video ${videoId} status: ${result.status}`);
+      this.logger.log(
+        `Video ${videoId} status: ${result.status} (raw: ${task.task_status})`,
+      );
+      if (task.task_result) {
+        this.logger.debug(
+          `Task result:`,
+          JSON.stringify(task.task_result, null, 2),
+        );
+      }
       if (result.videoUrl) {
         this.logger.log(`Video URL: ${result.videoUrl}`);
       }
@@ -196,6 +258,18 @@ export class KlingAiService {
       return result;
     } catch (error) {
       this.logger.error(`Error checking video status for ${videoId}:`, error);
+
+      if (error.response) {
+        this.logger.error('Status Check API Response Error:', {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+        });
+      }
+
+      if (error.request) {
+        this.logger.error('Status Check API Request Error:', error.request);
+      }
 
       // For development, simulate completion after some time
       const isOldRequest = this.isMockVideoReady(videoId);
