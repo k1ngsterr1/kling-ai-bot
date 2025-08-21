@@ -1168,11 +1168,33 @@ ${
     };
 
     const selectedPlan = plans[plan];
-    const savingsText = selectedPlan.oldPrice
-      ? `\n💰 Экономия: ${selectedPlan.oldPrice - selectedPlan.price}₽`
-      : '';
 
-    const text = `
+    let text = '';
+
+    if (plan === 'start') {
+      text = `
+✅ ВЫ ВЫБРАЛИ: СТАРТОВЫЙ ПАКЕТ
+
+▫️ **Срок действия**: 1 месяц
+▫️ **Автопродление**: Да (ежемесячно)
+
+📊 **ВКЛЮЧЕНО В ПАКЕТ**:
+🎬 25 video -токенов
+🖼️ 100 img -токенов
+
+💳 **СТОИМОСТЬ ПОДПИСКИ**:
+1200 ₽/мес
+
+⚠️ **ВАЖНЫЕ УСЛОВИЯ**:
+1. Подписка автоматически продлевается за 1 день до окончания периода
+2. Отменить можно в любой момент в разделе "Баланс"
+      `;
+    } else {
+      const savingsText = selectedPlan.oldPrice
+        ? `\n💰 Экономия: ${selectedPlan.oldPrice - selectedPlan.price}₽`
+        : '';
+
+      text = `
 ${selectedPlan.name}
 
 📦 Включает:
@@ -1184,7 +1206,8 @@ ${selectedPlan.name}
 💵 Стоимость: ${selectedPlan.price}₽/мес${savingsText}
 
 Для оформления подписки обратитесь к администратору.
-    `;
+      `;
+    }
 
     const keyboard = {
       inline_keyboard: [
