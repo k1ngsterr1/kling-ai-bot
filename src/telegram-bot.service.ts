@@ -591,15 +591,24 @@ ID: #${generationResult.id}
         inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main' }]],
       };
 
-      await this.bot.sendMessage(chatId, generationText, {
-        reply_markup: keyboard,
-      });
+      const progressMessage = await this.bot.sendMessage(
+        chatId,
+        generationText,
+        {
+          reply_markup: keyboard,
+        },
+      );
 
       // Clear user state as generation is started
       this.userStates.delete(chatId);
 
       // Start polling for video status
-      this.pollVideoStatus(chatId, generationResult.id, totalCost);
+      this.pollVideoStatus(
+        chatId,
+        generationResult.id,
+        totalCost,
+        progressMessage.message_id,
+      );
     } catch (error) {
       this.logger.error('Error starting video generation:', error);
       this.bot.sendMessage(
@@ -617,7 +626,12 @@ ID: #${generationResult.id}
     }
   }
 
-  private async pollVideoStatus(chatId: number, videoId: string, cost: number) {
+  private async pollVideoStatus(
+    chatId: number,
+    videoId: string,
+    cost: number,
+    progressMessageId: number,
+  ) {
     const maxAttempts = 30; // Poll for up to 15 minutes (30 * 30 seconds)
     let attempts = 0;
 
@@ -626,6 +640,43 @@ ID: #${generationResult.id}
 
       try {
         const status = await this.klingAiService.getVideoStatus(videoId);
+
+        // Calculate progress based on attempts and status
+        const progress = this.calculateProgress(
+          attempts,
+          maxAttempts,
+          status.status,
+        );
+        const progressBar = this.createProgressBar(progress);
+
+        // Update progress message
+        const estimatedMinutes = Math.ceil(180 / 60); // 3 minutes default
+        const updatedText = `
+3.5 Пользователь Нажал кнопку [⚡ Начать генерацию]
+⏳ Генерация начата!
+ID: #${videoId}
+Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
+Текущий статус: ${progressBar} ${progress}%]
+
+🔔 Мы пришлем результат сразу как он будет готов
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🏠 Главное меню', callback_data: 'main' }],
+          ],
+        };
+
+        // Update the progress message
+        try {
+          await this.bot.editMessageText(updatedText, {
+            chat_id: chatId,
+            message_id: progressMessageId,
+            reply_markup: keyboard,
+          });
+        } catch (editError) {
+          this.logger.warn('Could not update progress message:', editError);
+        }
 
         if (status.status === 'completed' && status.videoUrl) {
           // Video is ready
@@ -992,5 +1043,43 @@ ${
       this.logger.error('Error sending video:', error);
       throw error;
     }
+  }
+
+  private calculateProgress(
+    attempts: number,
+    maxAttempts: number,
+    status: string,
+  ): number {
+    if (status === 'completed') return 100;
+    if (status === 'failed') return 0;
+
+    // Base progress on attempts (time elapsed)
+    const timeProgress = Math.min((attempts / maxAttempts) * 100, 95);
+
+    // Add status-based progress
+    let statusProgress = 0;
+    switch (status) {
+      case 'pending':
+        statusProgress = 10;
+        break;
+      case 'processing':
+        statusProgress = 30;
+        break;
+      default:
+        statusProgress = 20;
+    }
+
+    return Math.min(Math.max(timeProgress, statusProgress), 95);
+  }
+
+  private createProgressBar(progress: number): string {
+    const totalBlocks = 15;
+    const filledBlocks = Math.floor((progress / 100) * totalBlocks);
+    const emptyBlocks = totalBlocks - filledBlocks;
+
+    const filled = '█'.repeat(filledBlocks);
+    const empty = '▒'.repeat(emptyBlocks);
+
+    return `[${filled}${empty}`;
   }
 }
