@@ -8,6 +8,45 @@ export class TelegramBotService {
   private readonly logger = new Logger(TelegramBotService.name);
   private bot: TelegramBot;
   private userStates: Map<number, { state: string; data?: any }> = new Map();
+  private readonly adminIds: number[] = [205204465, 839885529]; // Admin IDs
+  private readonly channelId = '@vse_ai'; // Channel for subscription check
+
+  // User groups for broadcasts
+  private userGroups: Map<number, 'never_paid' | 'high_intent' | 'new_id'> =
+    new Map();
+
+  // User tokens with expiration
+  private userTokens: Map<
+    number,
+    {
+      videoTokens: number;
+      imageTokens: number;
+      expiresAt: Date;
+      fromBroadcast?: boolean;
+    }
+  > = new Map();
+
+  // Pending tokens waiting for subscription
+  private pendingTokens: Map<
+    number,
+    {
+      videoTokens: number;
+      imageTokens: number;
+      broadcastMessageId?: number;
+    }
+  > = new Map();
+
+  private broadcastStates: Map<
+    number,
+    {
+      type?: string;
+      content?: string;
+      videoTokens?: number;
+      imageTokens?: number;
+      targetGroup?: string;
+      requiresSubscription?: boolean;
+    }
+  > = new Map();
 
   constructor(
     private configService: ConfigService,
@@ -20,6 +59,14 @@ export class TelegramBotService {
 
     this.bot = new TelegramBot(token, { polling: true });
     this.setupBot();
+
+    // Start periodic cleanup of expired tokens (every hour)
+    setInterval(
+      () => {
+        this.cleanupExpiredTokens();
+      },
+      60 * 60 * 1000,
+    );
   }
 
   private setupBot() {
@@ -28,6 +75,13 @@ export class TelegramBotService {
     // Handle /start command
     this.bot.onText(/\/start/, (msg) => {
       const chatId = msg.chat.id;
+      const userId = msg.from?.id;
+
+      // Add new users to NEW_ID group if they haven't been classified yet
+      if (userId && !this.userGroups.has(userId)) {
+        this.addUserToGroup(userId, 'new_id');
+      }
+
       this.sendWelcomeMessage(chatId);
     });
 
@@ -59,6 +113,18 @@ export class TelegramBotService {
     this.bot.onText(/\/help/, (msg) => {
       const chatId = msg.chat.id;
       this.handleHelpCommand(chatId);
+    });
+
+    // Admin only command for broadcasts
+    this.bot.onText(/\/broadcast/, (msg) => {
+      const chatId = msg.chat.id;
+      this.handleBroadcastCommand(chatId, msg.from?.id);
+    });
+
+    // Admin only command for managing Kling AI tokens
+    this.bot.onText(/\/admin/, (msg) => {
+      const chatId = msg.chat.id;
+      this.handleAdminCommand(chatId, msg.from?.id);
     });
 
     // Handle callback queries from inline keyboards
@@ -350,6 +416,100 @@ export class TelegramBotService {
         break;
       case 'cancel_subscription':
         this.handleCancelSubscription(chatId);
+        break;
+      case 'buy_50_video':
+        this.handlePackagePurchase(chatId, '50 video', 2240, 'видео');
+        break;
+      case 'buy_100_video':
+        this.handlePackagePurchase(chatId, '100 video', 4256, 'видео');
+        break;
+      case 'buy_250_video':
+        this.handlePackagePurchase(chatId, '250 video', 9968, 'видео');
+        break;
+      case 'buy_100_img':
+        this.handlePackagePurchase(chatId, '100 img', 449, 'изображений');
+        break;
+      case 'buy_200_img':
+        this.handlePackagePurchase(chatId, '200 img', 790, 'изображений');
+        break;
+      case 'buy_500_img':
+        this.handlePackagePurchase(chatId, '500 img', 1900, 'изображений');
+        break;
+      case 'broadcast_start':
+        this.handleBroadcastStart(chatId, callbackQuery.from?.id);
+        break;
+      case 'broadcast_never_paid':
+        this.handleBroadcastGroup(chatId, 'never_paid', callbackQuery.from?.id);
+        break;
+      case 'broadcast_high_intent':
+        this.handleBroadcastGroup(
+          chatId,
+          'high_intent',
+          callbackQuery.from?.id,
+        );
+        break;
+      case 'broadcast_new_id':
+        this.handleBroadcastGroup(chatId, 'new_id', callbackQuery.from?.id);
+        break;
+      case 'broadcast_select_never_paid':
+        this.handleGroupSelection(chatId, 'never_paid', callbackQuery.from?.id);
+        break;
+      case 'broadcast_select_high_intent':
+        this.handleGroupSelection(
+          chatId,
+          'high_intent',
+          callbackQuery.from?.id,
+        );
+        break;
+      case 'broadcast_select_new_id':
+        this.handleGroupSelection(chatId, 'new_id', callbackQuery.from?.id);
+        break;
+      case 'broadcast_require_sub':
+        this.handleSubscriptionRequirement(
+          chatId,
+          true,
+          callbackQuery.from?.id,
+        );
+        break;
+      case 'broadcast_no_sub':
+        this.handleSubscriptionRequirement(
+          chatId,
+          false,
+          callbackQuery.from?.id,
+        );
+        break;
+      case 'broadcast_confirm':
+        this.handleBroadcastConfirm(chatId, callbackQuery.from?.id);
+        break;
+      case 'broadcast_cancel':
+        this.handleBroadcastCancel(chatId, callbackQuery.from?.id);
+        break;
+      case 'back_to_broadcast':
+        this.handleBroadcastCommand(chatId, callbackQuery.from?.id);
+        break;
+      case 'check_subscription':
+        this.handleCheckSubscription(chatId, callbackQuery.from?.id);
+        break;
+      case 'subscribe_channel':
+        this.handleSubscribeChannel(chatId);
+        break;
+      case 'admin_tokens':
+        this.handleAdminTokens(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_view_tokens':
+        this.handleViewUserTokens(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_add_tokens':
+        this.handleAddTokensMenu(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_remove_tokens':
+        this.handleRemoveTokensMenu(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_clear_expired':
+        this.handleClearExpiredTokens(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_back':
+        this.handleAdminCommand(chatId, callbackQuery.from?.id);
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
@@ -844,6 +1004,42 @@ ID: #${videoId}
 
     const userState = this.userStates.get(chatId);
 
+    // Handle broadcast states first
+    if (userState?.state === 'awaiting_broadcast_content') {
+      this.handleBroadcastContent(msg);
+      return;
+    }
+
+    if (
+      userState?.state === 'awaiting_broadcast_tokens' &&
+      this.isAdmin(msg.from?.id)
+    ) {
+      this.handleBroadcastTokens(chatId, text);
+      return;
+    }
+
+    // Handle admin token management states
+    if (
+      userState?.state === 'awaiting_user_id_for_tokens' &&
+      this.isAdmin(msg.from?.id)
+    ) {
+      this.handleUserIdForTokens(chatId, text, userState.data?.action);
+      return;
+    }
+
+    if (
+      userState?.state === 'awaiting_token_amounts' &&
+      this.isAdmin(msg.from?.id)
+    ) {
+      this.handleTokenAmounts(
+        chatId,
+        text,
+        userState.data?.userId,
+        userState.data?.action,
+      );
+      return;
+    }
+
     if (userState?.state === 'waiting_video_prompt') {
       // User is in video generation flow
       if (text.length > 300) {
@@ -852,6 +1048,14 @@ ID: #${videoId}
           '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
         );
         return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
       }
 
       // Save the prompt
@@ -1226,19 +1430,15 @@ ${selectedPlan.name}
     const text = `
 💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ
 
-Покупай генерации без подписок и ограничений:
+🎬 Video-ТОКЕНЫ:
+▫️ 50 видео • 2240₽
+🔥 100 видео • 4256₽ • ~~4480₽~~ (-5%)
+🔥 250 видео • 9968₽ • ~~11200₽~~ (-11%)
 
-🎬 Видео пакеты:
-• 10 видео - 500₽
-• 25 видео - 1100₽  
-• 50 видео - 2000₽
-• 100 видео - 3800₽
-
-📸 Изображения:
-• 50 изо - 200₽
-• 100 изо - 350₽
-• 200 изо - 600₽
-• 500 изо - 1400₽
+�️ Image-ТОКЕНЫ:
+▫️ 100 изо • 449₽
+🔥 200 изо • 790₽ • ~~898₽~~ (-12%)
+🔥 500 изо • 1900₽ • ~~2245₽~~ (-15%)
 
 ✨ Преимущества:
 • Токены не сгорают
@@ -1248,8 +1448,18 @@ ${selectedPlan.name}
 
     const keyboard = {
       inline_keyboard: [
-        [{ text: '🎬 Купить видео пакет', callback_data: 'buy_video_package' }],
-        [{ text: '📸 Купить изображения', callback_data: 'buy_image_package' }],
+        [
+          { text: '🎬 50 video | 2240₽', callback_data: 'buy_50_video' },
+          { text: '🖼️ 100 img | 449₽', callback_data: 'buy_100_img' },
+        ],
+        [
+          { text: '� 100 video | 4256₽', callback_data: 'buy_100_video' },
+          { text: '🔥 200 img | 790₽', callback_data: 'buy_200_img' },
+        ],
+        [
+          { text: '🔥 250 video | 9968₽', callback_data: 'buy_250_video' },
+          { text: '🔥 500 img | 1900₽', callback_data: 'buy_500_img' },
+        ],
         [
           { text: '◀️ Назад', callback_data: 'balance' },
           { text: '🏠 Главное меню', callback_data: 'main' },
@@ -1290,5 +1500,1075 @@ ${selectedPlan.name}
     };
 
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handlePackagePurchase(
+    chatId: number,
+    packageName: string,
+    price: number,
+    type: string,
+  ) {
+    const text = `
+✅ ВЫ ВЫБРАЛИ: ПАКЕТ "${packageName.toUpperCase()}"
+
+📋 Срок действия: 180 дней (6 месяцев)
+💳 Тип: Разовая покупка (без подписки)
+💎 Совместимость: Все новые модели Kling для ${type} генерации (V2.0-V2.1)
+
+ЧТО ВЫ МОЖЕТЕ СОЗДАТЬ:
+
+[💎 БАЗОВЫЙ КОНТЕНТ]
+▶ 50 STANDARD видео (1 токен/5s)
+  - Идеально для: TikTok/Reels, быстрые сторис, тестирование идей
+  - Пример: 50 коротких клипов о продукте
+
+[💎 ПРОФЕССИОНАЛЬНЫЙ КОНТЕНТ]
+▶ 25 PRO видео (2 токена/5s)
+  - Идеально для: рекламных роликов, инфографики, презентаций
+  - Пример: 25 качественных промо-роликов для соцсетей
+
+[💎 ПРЕМИУМ КОНТЕНТ]
+▶ 12 MASTER видео (4 токена/5s)
+  - Идеально для: YouTube-анонсов, продающих видео, ключевых постов
+  - Пример: 12 топовых видео для запуска продукта
+
+💳 СТОИМОСТЬ: ${price}₽
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '💳 Купить пакет',
+            callback_data: `purchase_package_${packageName.replace(' ', '_')}`,
+          },
+        ],
+        [
+          { text: '◀️ Назад к пакетам', callback_data: 'additional_packages' },
+          { text: '🏠 Главное меню', callback_data: 'main' },
+        ],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private isAdmin(userId?: number): boolean {
+    return userId ? this.adminIds.includes(userId) : false;
+  }
+
+  private handleBroadcastCommand(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+📢 ПАНЕЛЬ РАССЫЛОК
+
+Выберите группу пользователей для рассылки:
+
+🔴 NEVER PAID - никогда не оплачивали
+🟡 HIGH INTENT - оставили промпт/дошли до оплаты, но не завершили
+🟢 NEW_ID - ранее не получали рассылки с пункта 8.2 (новые пользователи)
+
+Механика:
+Вы напишете пост, укажете количество генераций видео и изображений, выберите группу рассылки, укажете требуется ли подписка на канал @vse_ai.
+
+a) Выбранным пользователям приходит пост
+b) Этим пользователям добавляется токены в видео и изображения (неиспользованные удаляются через 3 дня)
+c) Если указана подписка на канал, то генерации добавляются только после подписки на канал @vse_ai
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🔴 NEVER PAID', callback_data: 'broadcast_never_paid' }],
+        [{ text: '🟡 HIGH INTENT', callback_data: 'broadcast_high_intent' }],
+        [{ text: '🟢 NEW_ID', callback_data: 'broadcast_new_id' }],
+        [
+          {
+            text: '📝 Начать создание рассылки',
+            callback_data: 'broadcast_start',
+          },
+        ],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleBroadcastStart(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    this.broadcastStates.set(chatId, {});
+
+    const text = `
+📝 СОЗДАНИЕ РАССЫЛКИ - ШАГ 1/5
+
+Отправьте содержание поста для рассылки.
+Это может быть:
+- Текст
+- Фото с подписью
+- Видео с подписью
+- Комбинированный контент
+
+После отправки перейдем к настройке токенов и целевой аудитории.
+    `;
+
+    this.bot.sendMessage(chatId, text);
+
+    // Set user state to expect broadcast content
+    this.userStates.set(chatId, { state: 'awaiting_broadcast_content' });
+  }
+
+  private handleBroadcastGroup(
+    chatId: number,
+    groupType: string,
+    userId?: number,
+  ) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const groupNames = {
+      never_paid: 'NEVER PAID - никогда не оплачивали',
+      high_intent: 'HIGH INTENT - дошли до оплаты, но не завершили',
+      new_id: 'NEW_ID - новые пользователи',
+    };
+
+    const groupName = groupNames[groupType] || 'Неизвестная группа';
+
+    const text = `
+📊 СТАТИСТИКА ГРУППЫ: ${groupName}
+
+🔍 Анализ пользователей:
+- Общее количество: подсчитывается...
+- Активные за последние 7 дней: подсчитывается...
+- Последняя рассылка: не проводилась
+
+Для создания рассылки для этой группы используйте кнопку "📝 Начать создание рассылки" в главном меню рассылок.
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '◀️ Назад к рассылкам', callback_data: 'back_to_broadcast' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private async handleBroadcastContent(msg: TelegramBot.Message) {
+    const chatId = msg.chat.id;
+    const userState = this.userStates.get(chatId);
+
+    if (!this.isAdmin(msg.from?.id)) {
+      return;
+    }
+
+    if (userState?.state !== 'awaiting_broadcast_content') {
+      return;
+    }
+
+    // Store the message content for broadcast
+    const broadcastState = this.broadcastStates.get(chatId) || {};
+    broadcastState.content = JSON.stringify(msg);
+    this.broadcastStates.set(chatId, broadcastState);
+
+    const text = `
+📝 СОЗДАНИЕ РАССЫЛКИ - ШАГ 2/5
+
+✅ Контент сохранен!
+
+Теперь укажите количество токенов для рассылки:
+
+Формат: [количество_видео] [количество_изображений]
+Пример: 5 10
+
+Отправьте в следующем сообщении.
+    `;
+
+    this.bot.sendMessage(chatId, text);
+    this.userStates.set(chatId, { state: 'awaiting_broadcast_tokens' });
+  }
+
+  private handleBroadcastTokens(chatId: number, text: string) {
+    const tokens = text.trim().split(/\s+/);
+
+    if (tokens.length !== 2) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Неверный формат! Используйте: [количество_видео] [количество_изображений]\nПример: 5 10',
+      );
+      return;
+    }
+
+    const videoTokens = parseInt(tokens[0]);
+    const imageTokens = parseInt(tokens[1]);
+
+    if (
+      isNaN(videoTokens) ||
+      isNaN(imageTokens) ||
+      videoTokens < 0 ||
+      imageTokens < 0
+    ) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Некорректные числа! Используйте положительные числа.\nПример: 5 10',
+      );
+      return;
+    }
+
+    // Update broadcast state
+    const broadcastState = this.broadcastStates.get(chatId) || {};
+    broadcastState.videoTokens = videoTokens;
+    broadcastState.imageTokens = imageTokens;
+    this.broadcastStates.set(chatId, broadcastState);
+
+    const text1 = `
+📝 СОЗДАНИЕ РАССЫЛКИ - ШАГ 3/5
+
+✅ Токены установлены:
+🎬 Видео: ${videoTokens} токенов
+🖼️ Изображения: ${imageTokens} токенов
+
+Теперь выберите целевую группу пользователей:
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '🔴 NEVER PAID',
+            callback_data: 'broadcast_select_never_paid',
+          },
+        ],
+        [
+          {
+            text: '🟡 HIGH INTENT',
+            callback_data: 'broadcast_select_high_intent',
+          },
+        ],
+        [{ text: '🟢 NEW_ID', callback_data: 'broadcast_select_new_id' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text1, { reply_markup: keyboard });
+    this.userStates.set(chatId, { state: 'awaiting_group_selection' });
+  }
+
+  private handleGroupSelection(chatId: number, group: string, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const broadcastState = this.broadcastStates.get(chatId) || {};
+    broadcastState.targetGroup = group;
+    this.broadcastStates.set(chatId, broadcastState);
+
+    const groupNames = {
+      never_paid: 'NEVER PAID',
+      high_intent: 'HIGH INTENT',
+      new_id: 'NEW_ID',
+    };
+
+    const text = `
+📝 СОЗДАНИЕ РАССЫЛКИ - ШАГ 4/5
+
+✅ Группа выбрана: ${groupNames[group]}
+
+Требуется ли подписка на канал @vse_ai?
+Если да, то токены будут добавлены только после подписки.
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '✅ Требуется подписка',
+            callback_data: 'broadcast_require_sub',
+          },
+        ],
+        [{ text: '❌ Без подписки', callback_data: 'broadcast_no_sub' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleSubscriptionRequirement(
+    chatId: number,
+    requiresSubscription: boolean,
+    userId?: number,
+  ) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const broadcastState = this.broadcastStates.get(chatId) || {};
+    broadcastState.requiresSubscription = requiresSubscription;
+    this.broadcastStates.set(chatId, broadcastState);
+
+    const groupNames = {
+      never_paid: 'NEVER PAID',
+      high_intent: 'HIGH INTENT',
+      new_id: 'NEW_ID',
+    };
+
+    const groupName = broadcastState.targetGroup
+      ? groupNames[broadcastState.targetGroup] || 'Неизвестная'
+      : 'Не выбрана';
+    const subText = requiresSubscription
+      ? '✅ Требуется подписка на @vse_ai'
+      : '❌ Без подписки';
+
+    const text = `
+📝 СОЗДАНИЕ РАССЫЛКИ - ШАГ 5/5
+
+📋 ИТОГОВЫЕ НАСТРОЙКИ:
+🎬 Видео токены: ${broadcastState.videoTokens || 0}
+🖼️ Токены изображений: ${broadcastState.imageTokens || 0}
+👥 Целевая группа: ${groupName}
+📺 Подписка: ${subText}
+
+⚠️ ВНИМАНИЕ: После подтверждения рассылка будет отправлена всем пользователям выбранной группы!
+
+Неиспользованные токены удаляются через 3 дня.
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🚀 ЗАПУСТИТЬ РАССЫЛКУ', callback_data: 'broadcast_confirm' }],
+        [{ text: '❌ Отменить', callback_data: 'broadcast_cancel' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private async handleBroadcastConfirm(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const broadcastState = this.broadcastStates.get(chatId);
+
+    if (
+      !broadcastState ||
+      !broadcastState.content ||
+      !broadcastState.targetGroup
+    ) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Ошибка: неполная информация для рассылки',
+      );
+      return;
+    }
+
+    this.bot.sendMessage(
+      chatId,
+      '🚀 Рассылка запущена! Это может занять некоторое время...',
+    );
+
+    // Get target users by group
+    const targetUsers = this.getUsersByGroup(
+      broadcastState.targetGroup as 'never_paid' | 'high_intent' | 'new_id',
+    );
+    let sentCount = 0;
+
+    // Parse the stored message
+    const originalMessage = JSON.parse(broadcastState.content);
+
+    for (const targetUserId of targetUsers) {
+      try {
+        // Send the broadcast message
+        await this.sendBroadcastMessage(targetUserId, originalMessage);
+
+        // Handle tokens
+        if (broadcastState.requiresSubscription) {
+          // Check if user is already subscribed
+          const isSubscribed = await this.checkUserSubscription(targetUserId);
+
+          if (isSubscribed) {
+            // Add tokens directly
+            this.addTokensToUser(
+              targetUserId,
+              broadcastState.videoTokens || 0,
+              broadcastState.imageTokens || 0,
+            );
+          } else {
+            // Store pending tokens and send subscription message
+            this.pendingTokens.set(targetUserId, {
+              videoTokens: broadcastState.videoTokens || 0,
+              imageTokens: broadcastState.imageTokens || 0,
+            });
+
+            await this.sendSubscriptionPrompt(
+              targetUserId,
+              broadcastState.videoTokens || 0,
+              broadcastState.imageTokens || 0,
+            );
+          }
+        } else {
+          // Add tokens directly
+          this.addTokensToUser(
+            targetUserId,
+            broadcastState.videoTokens || 0,
+            broadcastState.imageTokens || 0,
+          );
+        }
+
+        sentCount++;
+
+        // Small delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } catch (error) {
+        this.logger.error(
+          `Failed to send broadcast to user ${targetUserId}:`,
+          error,
+        );
+      }
+    }
+
+    const text = `
+✅ РАССЫЛКА ЗАВЕРШЕНА!
+
+📊 Статистика:
+• Целевая группа: ${broadcastState.targetGroup}
+• Отправлено: ${sentCount} пользователей
+• Токены добавлены: ${broadcastState.videoTokens}🎬 + ${broadcastState.imageTokens}🖼️
+• Подписка требуется: ${broadcastState.requiresSubscription ? 'Да' : 'Нет'}
+    `;
+
+    this.bot.sendMessage(chatId, text);
+
+    // Clean up
+    this.broadcastStates.delete(chatId);
+    this.userStates.delete(chatId);
+  }
+
+  private handleBroadcastCancel(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    // Clean up
+    this.broadcastStates.delete(chatId);
+    this.userStates.delete(chatId);
+
+    this.bot.sendMessage(chatId, '❌ Рассылка отменена');
+  }
+
+  // Utility methods for broadcast system
+
+  private getUsersByGroup(
+    group: 'never_paid' | 'high_intent' | 'new_id',
+  ): number[] {
+    const users: number[] = [];
+
+    for (const [userId, userGroup] of this.userGroups.entries()) {
+      if (userGroup === group) {
+        users.push(userId);
+      }
+    }
+
+    // For demo purposes, return some mock users if no real users found
+    if (users.length === 0) {
+      // In real implementation, this would query the database
+      this.logger.warn(`No users found for group ${group}, using demo mode`);
+    }
+
+    return users;
+  }
+
+  private async sendBroadcastMessage(userId: number, originalMessage: any) {
+    if (originalMessage.text) {
+      // Text message
+      await this.bot.sendMessage(userId, originalMessage.text);
+    } else if (originalMessage.photo) {
+      // Photo message
+      const photo = originalMessage.photo[originalMessage.photo.length - 1]; // Get highest quality
+      await this.bot.sendPhoto(userId, photo.file_id, {
+        caption: originalMessage.caption,
+      });
+    } else if (originalMessage.video) {
+      // Video message
+      await this.bot.sendVideo(userId, originalMessage.video.file_id, {
+        caption: originalMessage.caption,
+      });
+    } else if (originalMessage.document) {
+      // Document message
+      await this.bot.sendDocument(userId, originalMessage.document.file_id, {
+        caption: originalMessage.caption,
+      });
+    }
+  }
+
+  private async checkUserSubscription(userId: number): Promise<boolean> {
+    try {
+      const chatMember = await this.bot.getChatMember(this.channelId, userId);
+      return ['member', 'administrator', 'creator'].includes(chatMember.status);
+    } catch (error) {
+      this.logger.error(
+        `Error checking subscription for user ${userId}:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  private addTokensToUser(
+    userId: number,
+    videoTokens: number,
+    imageTokens: number,
+  ) {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 3); // 3 days from now
+
+    const existing = this.userTokens.get(userId);
+
+    if (existing) {
+      // Add to existing tokens
+      existing.videoTokens += videoTokens;
+      existing.imageTokens += imageTokens;
+      existing.expiresAt = expiresAt; // Reset expiration
+      existing.fromBroadcast = true;
+    } else {
+      // Create new token record
+      this.userTokens.set(userId, {
+        videoTokens,
+        imageTokens,
+        expiresAt,
+        fromBroadcast: true,
+      });
+    }
+
+    this.logger.log(
+      `Added tokens to user ${userId}: ${videoTokens} video, ${imageTokens} image`,
+    );
+  }
+
+  private async sendSubscriptionPrompt(
+    userId: number,
+    videoTokens: number,
+    imageTokens: number,
+  ) {
+    const text = `
+🎁 Вам начислены бесплатные генерации!
+
+Чтобы активировать их, подпишитесь на наш канал @vse_ai.
+
+🔓 После подписки вы получите:
+• ${imageTokens} генераций изображений
+• ${videoTokens} генераций видео (5 сек)
+
+⏳ Генерации действуют 3 дня. Успейте использовать!
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '✅ Подписаться на @vse_ai',
+            callback_data: 'subscribe_channel',
+          },
+        ],
+        [
+          {
+            text: '▶️ Проверить подписку',
+            callback_data: 'check_subscription',
+          },
+        ],
+      ],
+    };
+
+    await this.bot.sendMessage(userId, text, { reply_markup: keyboard });
+  }
+
+  private handleSubscribeChannel(chatId: number) {
+    this.bot.sendMessage(
+      chatId,
+      `Перейдите по ссылке для подписки: ${this.channelId}\n\nПосле подписки нажмите "Проверить подписку"`,
+    );
+  }
+
+  private async handleCheckSubscription(chatId: number, userId?: number) {
+    if (!userId) return;
+
+    const pendingTokensData = this.pendingTokens.get(chatId);
+    if (!pendingTokensData) {
+      this.bot.sendMessage(chatId, '❌ У вас нет ожидающих токенов');
+      return;
+    }
+
+    const isSubscribed = await this.checkUserSubscription(userId);
+
+    if (isSubscribed) {
+      // Add the pending tokens
+      this.addTokensToUser(
+        chatId,
+        pendingTokensData.videoTokens,
+        pendingTokensData.imageTokens,
+      );
+
+      // Remove from pending
+      this.pendingTokens.delete(chatId);
+
+      const text = `
+✅ Подписка подтверждена!
+
+🎉 Вам начислены токены:
+• ${pendingTokensData.imageTokens} генераций изображений
+• ${pendingTokensData.videoTokens} генераций видео (5 сек)
+
+⏳ Токены действуют 3 дня
+      `;
+
+      this.bot.sendMessage(chatId, text, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎬 Создать видео', callback_data: 'video' }],
+            [{ text: '🏠 Главное меню', callback_data: 'main' }],
+          ],
+        },
+      });
+    } else {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Подписка не найдена. Убедитесь, что вы подписались на канал @vse_ai',
+      );
+    }
+  }
+
+  // Method to clean up expired tokens (should be called periodically)
+  private cleanupExpiredTokens() {
+    const now = new Date();
+
+    for (const [userId, tokenData] of this.userTokens.entries()) {
+      if (tokenData.expiresAt < now) {
+        this.userTokens.delete(userId);
+        this.logger.log(`Cleaned up expired tokens for user ${userId}`);
+      }
+    }
+  }
+
+  // Method to add user to a group (to be called when user performs certain actions)
+  public addUserToGroup(
+    userId: number,
+    group: 'never_paid' | 'high_intent' | 'new_id',
+  ) {
+    this.userGroups.set(userId, group);
+    this.logger.log(`User ${userId} added to group ${group}`);
+  }
+
+  // Admin token management methods
+
+  private handleAdminCommand(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+⚙️ ПАНЕЛЬ АДМИНИСТРАТОРА
+
+Управление системой и токенами пользователей:
+
+🔧 Управление токенами:
+• Просмотр токенов пользователей
+• Добавление токенов
+• Удаление токенов
+• Очистка истекших токенов
+
+📊 Статистика системы в разработке
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '💎 Управление токенами', callback_data: 'admin_tokens' }],
+        [{ text: '🏠 Главное меню', callback_data: 'main' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleAdminTokens(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const totalUsers = this.userTokens.size;
+    const now = new Date();
+    let activeTokens = 0;
+    let expiredTokens = 0;
+
+    for (const [, tokenData] of this.userTokens.entries()) {
+      if (tokenData.expiresAt > now) {
+        activeTokens++;
+      } else {
+        expiredTokens++;
+      }
+    }
+
+    const text = `
+💎 УПРАВЛЕНИЕ ТОКЕНАМИ
+
+📊 Статистика:
+• Всего пользователей с токенами: ${totalUsers}
+• Активные токены: ${activeTokens}
+• Истекшие токены: ${expiredTokens}
+
+Выберите действие:
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '👁️ Просмотр токенов', callback_data: 'admin_view_tokens' }],
+        [{ text: '➕ Добавить токены', callback_data: 'admin_add_tokens' }],
+        [{ text: '➖ Удалить токены', callback_data: 'admin_remove_tokens' }],
+        [
+          {
+            text: '🗑️ Очистить истекшие',
+            callback_data: 'admin_clear_expired',
+          },
+        ],
+        [{ text: '◀️ Назад', callback_data: 'admin_back' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleViewUserTokens(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    let text = '👁️ ПРОСМОТР ТОКЕНОВ ПОЛЬЗОВАТЕЛЕЙ\n\n';
+
+    if (this.userTokens.size === 0) {
+      text += 'Нет пользователей с токенами.';
+    } else {
+      const now = new Date();
+      let counter = 1;
+
+      for (const [userId, tokenData] of this.userTokens.entries()) {
+        const isExpired = tokenData.expiresAt < now;
+        const expiryText = isExpired
+          ? '❌ ИСТЕК'
+          : `⏳ до ${tokenData.expiresAt.toLocaleString()}`;
+        const broadcastMark = tokenData.fromBroadcast ? ' 📢' : '';
+
+        text += `${counter}. User ID: ${userId}${broadcastMark}\n`;
+        text += `   🎬 Видео: ${tokenData.videoTokens} | 🖼️ Изображения: ${tokenData.imageTokens}\n`;
+        text += `   ${expiryText}\n\n`;
+
+        counter++;
+
+        // Limit to 20 users per message to avoid hitting Telegram's message limit
+        if (counter > 20) {
+          text += `... и еще ${this.userTokens.size - 20} пользователей`;
+          break;
+        }
+      }
+    }
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🔄 Обновить', callback_data: 'admin_view_tokens' }],
+        [{ text: '◀️ Назад к токенам', callback_data: 'admin_tokens' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleAddTokensMenu(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+➕ ДОБАВЛЕНИЕ ТОКЕНОВ
+
+Отправьте ID пользователя, которому нужно добавить токены.
+
+Пример: 123456789
+    `;
+
+    this.bot.sendMessage(chatId, text);
+    this.userStates.set(chatId, {
+      state: 'awaiting_user_id_for_tokens',
+      data: { action: 'add' },
+    });
+  }
+
+  private handleRemoveTokensMenu(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+➖ УДАЛЕНИЕ ТОКЕНОВ
+
+Отправьте ID пользователя, у которого нужно удалить токены.
+
+Пример: 123456789
+    `;
+
+    this.bot.sendMessage(chatId, text);
+    this.userStates.set(chatId, {
+      state: 'awaiting_user_id_for_tokens',
+      data: { action: 'remove' },
+    });
+  }
+
+  private handleUserIdForTokens(chatId: number, text: string, action: string) {
+    const targetUserId = parseInt(text.trim());
+
+    if (isNaN(targetUserId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Некорректный ID пользователя. Введите число.',
+      );
+      return;
+    }
+
+    const actionText = action === 'add' ? 'добавить' : 'удалить';
+    const currentTokens = this.userTokens.get(targetUserId);
+
+    let statusText = '';
+    if (currentTokens) {
+      const now = new Date();
+      const isExpired = currentTokens.expiresAt < now;
+      statusText = `\n\nТекущие токены:\n🎬 Видео: ${currentTokens.videoTokens}\n🖼️ Изображения: ${currentTokens.imageTokens}\nСтатус: ${isExpired ? '❌ Истек' : '✅ Активен'}`;
+    } else {
+      statusText = '\n\n❌ У пользователя нет токенов';
+    }
+
+    const text1 = `
+${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
+
+Пользователь ID: ${targetUserId}${statusText}
+
+Введите количество токенов в формате:
+[видео_токены] [токены_изображений]
+
+Пример: 5 10
+    `;
+
+    this.bot.sendMessage(chatId, text1);
+    this.userStates.set(chatId, {
+      state: 'awaiting_token_amounts',
+      data: { userId: targetUserId, action },
+    });
+  }
+
+  private handleTokenAmounts(
+    chatId: number,
+    text: string,
+    targetUserId: number,
+    action: string,
+  ) {
+    const amounts = text.trim().split(/\s+/);
+
+    if (amounts.length !== 2) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Неверный формат! Используйте: [видео] [изображения]\nПример: 5 10',
+      );
+      return;
+    }
+
+    const videoTokens = parseInt(amounts[0]);
+    const imageTokens = parseInt(amounts[1]);
+
+    if (
+      isNaN(videoTokens) ||
+      isNaN(imageTokens) ||
+      videoTokens < 0 ||
+      imageTokens < 0
+    ) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Некорректные числа! Используйте положительные числа.',
+      );
+      return;
+    }
+
+    if (action === 'add') {
+      this.addTokensToUser(targetUserId, videoTokens, imageTokens);
+
+      const text1 = `
+✅ ТОКЕНЫ ДОБАВЛЕНЫ
+
+Пользователь ID: ${targetUserId}
+➕ Добавлено:
+• 🎬 Видео токенов: ${videoTokens}
+• 🖼️ Токенов изображений: ${imageTokens}
+
+⏳ Действуют 3 дня
+      `;
+
+      this.bot.sendMessage(chatId, text1);
+
+      // Notify user about new tokens
+      try {
+        this.bot.sendMessage(
+          targetUserId,
+          `
+🎁 Вам начислены токены администратором!
+
+• 🎬 Видео токенов: ${videoTokens}
+• 🖼️ Токенов изображений: ${imageTokens}
+
+⏳ Действуют 3 дня. Успейте использовать!
+        `,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🎬 Создать видео', callback_data: 'video' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Could not notify user ${targetUserId} about new tokens`,
+        );
+      }
+    } else {
+      // Remove tokens
+      const currentTokens = this.userTokens.get(targetUserId);
+
+      if (!currentTokens) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ У пользователя нет токенов для удаления',
+        );
+        this.userStates.delete(chatId);
+        return;
+      }
+
+      const newVideoTokens = Math.max(
+        0,
+        currentTokens.videoTokens - videoTokens,
+      );
+      const newImageTokens = Math.max(
+        0,
+        currentTokens.imageTokens - imageTokens,
+      );
+
+      if (newVideoTokens === 0 && newImageTokens === 0) {
+        // Remove user completely if no tokens left
+        this.userTokens.delete(targetUserId);
+      } else {
+        // Update with remaining tokens
+        this.userTokens.set(targetUserId, {
+          ...currentTokens,
+          videoTokens: newVideoTokens,
+          imageTokens: newImageTokens,
+        });
+      }
+
+      const text1 = `
+✅ ТОКЕНЫ УДАЛЕНЫ
+
+Пользователь ID: ${targetUserId}
+➖ Удалено:
+• 🎬 Видео токенов: ${Math.min(videoTokens, currentTokens.videoTokens)}
+• 🖼️ Токенов изображений: ${Math.min(imageTokens, currentTokens.imageTokens)}
+
+Осталось:
+• 🎬 Видео: ${newVideoTokens}
+• 🖼️ Изображения: ${newImageTokens}
+      `;
+
+      this.bot.sendMessage(chatId, text1);
+    }
+
+    this.userStates.delete(chatId);
+  }
+
+  private handleClearExpiredTokens(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const beforeCount = this.userTokens.size;
+    this.cleanupExpiredTokens();
+    const afterCount = this.userTokens.size;
+    const removedCount = beforeCount - afterCount;
+
+    const text = `
+🗑️ ОЧИСТКА ЗАВЕРШЕНА
+
+📊 Результат:
+• Было пользователей с токенами: ${beforeCount}
+• Удалено истекших записей: ${removedCount}
+• Осталось активных: ${afterCount}
+    `;
+
+    this.bot.sendMessage(chatId, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '◀️ Назад к токенам', callback_data: 'admin_tokens' }],
+        ],
+      },
+    });
   }
 }
