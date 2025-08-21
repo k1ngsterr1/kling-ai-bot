@@ -201,11 +201,27 @@ export class TelegramBotService {
 /balance - Проверка баланса
 /help - Помощь
 
-Для получения дополнительной поддержки свяжитесь с администратором.
+📋 Документы:
     `;
 
     const keyboard = {
-      inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main' }]],
+      inline_keyboard: [
+        [
+          { text: '🔒 Политика конфиденциальности', url: 'https://teletype.in/@help_24/privacy_kling' }
+        ],
+        [
+          { text: '📜 Пользовательское соглашение', url: 'https://teletype.in/@help_24/agree_kling' }
+        ],
+        [
+          { text: '💎 Оферта', url: 'https://teletype.in/@help_24/oferta_kling' }
+        ],
+        [
+          { text: '📖 Подробные условия', url: 'https://teletype.in/@help_24/podrobno_kling' }
+        ],
+        [
+          { text: '🏠 Главное меню', callback_data: 'main' }
+        ]
+      ],
     };
 
     this.bot.sendMessage(chatId, helpText, { reply_markup: keyboard });
