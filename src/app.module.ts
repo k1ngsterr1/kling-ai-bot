@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { TelegramBotService } from './telegram-bot.service';
 import { TelegramController } from './telegram.controller';
 import { KlingAiService } from './kling-ai.service';
+import { PrismaService } from './prisma.service';
 
 @Module({
   imports: [
@@ -13,6 +14,6 @@ import { KlingAiService } from './kling-ai.service';
     }),
   ],
   controllers: [AppController, TelegramController],
-  providers: [AppService, TelegramBotService, KlingAiService],
+  providers: [AppService, TelegramBotService, KlingAiService, PrismaService],
 })
 export class AppModule {}

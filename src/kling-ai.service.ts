@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from './prisma.service';
 import axios, { AxiosInstance } from 'axios';
 import * as jwt from 'jsonwebtoken';
 
@@ -19,20 +20,74 @@ export interface KlingVideoResponse {
 }
 
 @Injectable()
-export class KlingAiService {
+export class KlingAiService implements OnModuleInit {
   private readonly logger = new Logger(KlingAiService.name);
-  private readonly httpClient: AxiosInstance;
-  private readonly accessKey: string;
-  private readonly secretKey: string;
+  private httpClient: AxiosInstance;
+  private accessKey: string;
+  private secretKey: string;
 
-  constructor(private configService: ConfigService) {
-    this.accessKey =
-      this.configService.get<string>('KLING_ACCESS_KEY') ||
-      'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
-    this.secretKey =
-      this.configService.get<string>('KLING_SECRET_KEY') ||
-      'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
+    this.loadKlingConfig();
+    this.initializeHttpClient();
+  }
 
+  async onModuleInit() {
+    await this.loadKlingConfig();
+    this.initializeHttpClient();
+  }
+
+  private async loadKlingConfig() {
+    try {
+      // Try to load from database first
+      const config = await this.prisma.klingConfig.findFirst({
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      if (config) {
+        this.accessKey = config.accessKey;
+        this.secretKey = config.secretKey;
+      } else {
+        // Fallback to environment variables
+        this.accessKey =
+          this.configService.get<string>('KLING_ACCESS_KEY') ||
+          'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
+        this.secretKey =
+          this.configService.get<string>('KLING_SECRET_KEY') ||
+          'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
+
+        // Save initial config to database
+        await this.saveKlingConfig();
+      }
+    } catch (error) {
+      this.logger.error('Error loading Kling config:', error);
+      this.accessKey =
+        this.configService.get<string>('KLING_ACCESS_KEY') ||
+        'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
+      this.secretKey =
+        this.configService.get<string>('KLING_SECRET_KEY') ||
+        'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
+    }
+  }
+
+  private async saveKlingConfig() {
+    try {
+      // Delete old configs and create new one
+      await this.prisma.klingConfig.deleteMany({});
+      await this.prisma.klingConfig.create({
+        data: {
+          accessKey: this.accessKey,
+          secretKey: this.secretKey,
+        },
+      });
+    } catch (error) {
+      this.logger.error('Error saving Kling config:', error);
+    }
+  }
+
+  private initializeHttpClient() {
     this.httpClient = axios.create({
       baseURL: 'https://api.klingai.com',
       timeout: 60000,
@@ -321,5 +376,39 @@ export class KlingAiService {
     // Simple mock logic - consider video ready if it's been more than 30 seconds
     // In real implementation, this would be based on actual API response
     return Math.random() > 0.5;
+  }
+
+  // Admin methods for updating API keys
+  async updateAccessKey(newAccessKey: string): Promise<void> {
+    this.logger.log(
+      `Updating access key: ${newAccessKey.substring(0, 6)}***${newAccessKey.substring(newAccessKey.length - 4)}`,
+    );
+    this.accessKey = newAccessKey;
+    await this.saveKlingConfig(); // Save to database
+    this.initializeHttpClient(); // Reinitialize with new keys
+  }
+
+  async updateSecretKey(newSecretKey: string): Promise<void> {
+    this.logger.log(
+      `Updating secret key: ${newSecretKey.substring(0, 6)}***${newSecretKey.substring(newSecretKey.length - 4)}`,
+    );
+    this.secretKey = newSecretKey;
+    await this.saveKlingConfig(); // Save to database
+    this.initializeHttpClient(); // Reinitialize with new keys
+  }
+
+  getCurrentAccessKey(): string {
+    return this.accessKey;
+  }
+
+  getCurrentSecretKey(): string {
+    return this.secretKey;
+  }
+
+  updateBothKeys(newAccessKey: string, newSecretKey: string): void {
+    this.logger.log('Updating both API keys');
+    this.accessKey = newAccessKey;
+    this.secretKey = newSecretKey;
+    this.initializeHttpClient(); // Reinitialize with new keys
   }
 }

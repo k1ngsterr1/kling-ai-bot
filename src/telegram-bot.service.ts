@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot = require('node-telegram-bot-api');
 import { KlingAiService, KlingVideoRequest } from './kling-ai.service';
+import { PrismaService } from './prisma.service';
 
 @Injectable()
 export class TelegramBotService {
@@ -51,6 +52,7 @@ export class TelegramBotService {
   constructor(
     private configService: ConfigService,
     private klingAiService: KlingAiService,
+    private prisma: PrismaService,
   ) {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     if (!token) {
@@ -73,13 +75,13 @@ export class TelegramBotService {
     this.logger.log('Telegram bot is starting...');
 
     // Handle /start command
-    this.bot.onText(/\/start/, (msg) => {
+    this.bot.onText(/\/start/, async (msg) => {
       const chatId = msg.chat.id;
       const userId = msg.from?.id;
 
-      // Add new users to NEW_ID group if they haven't been classified yet
-      if (userId && !this.userGroups.has(userId)) {
-        this.addUserToGroup(userId, 'new_id');
+      if (userId && msg.from) {
+        // Register or update user in database
+        await this.registerUser(msg.from);
       }
 
       this.sendWelcomeMessage(chatId);
@@ -511,6 +513,18 @@ export class TelegramBotService {
       case 'admin_back':
         this.handleAdminCommand(chatId, callbackQuery.from?.id);
         break;
+      case 'admin_api_keys':
+        this.handleAdminApiKeys(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_change_access_key':
+        this.handleChangeAccessKey(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_change_secret_key':
+        this.handleChangeSecretKey(chatId, callbackQuery.from?.id);
+        break;
+      case 'admin_view_current_keys':
+        this.handleViewCurrentKeys(chatId, callbackQuery.from?.id);
+        break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
     }
@@ -885,18 +899,24 @@ ID: #${videoId}
         if (status.status === 'completed' && status.videoUrl) {
           // Video is ready - send video with caption and buttons
           try {
+            // Send as video first
             await this.bot.sendVideo(chatId, status.videoUrl, {
               caption: `🎉 Ваше видео готово!
 
 Видео #${videoId} | Стоимость: ${cost} токенов
 
-Спасибо за использование нашего сервиса!`,
+📺 Видео для просмотра`,
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
                   [{ text: '🏠 Главное меню', callback_data: 'main' }],
                 ],
               },
+            });
+
+            // Send as document/file for download
+            await this.bot.sendDocument(chatId, status.videoUrl, {
+              caption: `📁 Файл для скачивания\n\nСпасибо за использование нашего сервиса!`,
             });
           } catch (videoError) {
             this.logger.warn('Could not send video directly:', videoError);
@@ -1037,6 +1057,23 @@ ID: #${videoId}
         userState.data?.userId,
         userState.data?.action,
       );
+      return;
+    }
+
+    // Handle API keys management states
+    if (
+      userState?.state === 'awaiting_access_key' &&
+      this.isAdmin(msg.from?.id)
+    ) {
+      this.handleNewAccessKey(chatId, text);
+      return;
+    }
+
+    if (
+      userState?.state === 'awaiting_secret_key' &&
+      this.isAdmin(msg.from?.id)
+    ) {
+      this.handleNewSecretKey(chatId, text);
       return;
     }
 
@@ -1295,7 +1332,24 @@ ${
   // Public method to send videos
   async sendVideo(chatId: number, video: any, options?: any) {
     try {
-      return await this.bot.sendVideo(chatId, video, options);
+      // Send as video first
+      const videoResult = await this.bot.sendVideo(chatId, video, options);
+
+      // If it's a URL (not file_id), also send as document for download
+      if (
+        typeof video === 'string' &&
+        (video.startsWith('http') || video.startsWith('https'))
+      ) {
+        try {
+          await this.bot.sendDocument(chatId, video, {
+            caption: '📁 Файл для скачивания',
+          });
+        } catch (docError) {
+          this.logger.warn('Could not send video as document:', docError);
+        }
+      }
+
+      return videoResult;
     } catch (error) {
       this.logger.error('Error sending video:', error);
       throw error;
@@ -2212,12 +2266,23 @@ c) Если указана подписка на канал, то генерац
 • Удаление токенов
 • Очистка истекших токенов
 
-📊 Статистика системы в разработке
+� Управление Kling AI API:
+• Просмотр текущих ключей
+• Изменение Access Key
+• Изменение Secret Key
+
+�📊 Статистика системы в разработке
     `;
 
     const keyboard = {
       inline_keyboard: [
         [{ text: '💎 Управление токенами', callback_data: 'admin_tokens' }],
+        [
+          {
+            text: '🔑 Управление API ключами',
+            callback_data: 'admin_api_keys',
+          },
+        ],
         [{ text: '🏠 Главное меню', callback_data: 'main' }],
       ],
     };
@@ -2570,5 +2635,333 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
         ],
       },
     });
+  }
+
+  // API Keys management methods
+
+  private handleAdminApiKeys(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+🔑 УПРАВЛЕНИЕ KLING AI API КЛЮЧАМИ
+
+Здесь вы можете просматривать и изменять API ключи для Kling AI:
+
+🔍 Просмотр текущих ключей
+🔧 Изменение Access Key
+🔧 Изменение Secret Key
+
+⚠️ ВНИМАНИЕ: Изменение ключей повлияет на все генерации видео!
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '👁️ Просмотреть текущие ключи',
+            callback_data: 'admin_view_current_keys',
+          },
+        ],
+        [
+          {
+            text: '🔧 Изменить Access Key',
+            callback_data: 'admin_change_access_key',
+          },
+        ],
+        [
+          {
+            text: '🔧 Изменить Secret Key',
+            callback_data: 'admin_change_secret_key',
+          },
+        ],
+        [{ text: '◀️ Назад к админ панели', callback_data: 'admin_back' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private handleViewCurrentKeys(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    // Get current keys from KlingAiService
+    const currentAccessKey =
+      this.klingAiService.getCurrentAccessKey() || 'Не установлен';
+    const currentSecretKey =
+      this.klingAiService.getCurrentSecretKey() || 'Не установлен';
+
+    // Mask the keys for security (show only first 6 and last 4 characters)
+    const maskedAccessKey =
+      currentAccessKey.length > 10
+        ? `${currentAccessKey.substring(0, 6)}***${currentAccessKey.substring(currentAccessKey.length - 4)}`
+        : currentAccessKey;
+
+    const maskedSecretKey =
+      currentSecretKey.length > 10
+        ? `${currentSecretKey.substring(0, 6)}***${currentSecretKey.substring(currentSecretKey.length - 4)}`
+        : currentSecretKey;
+
+    const text = `
+👁️ ТЕКУЩИЕ API КЛЮЧИ KLING AI
+
+🔑 Access Key: \`${maskedAccessKey}\`
+🔐 Secret Key: \`${maskedSecretKey}\`
+
+⚠️ Ключи частично скрыты для безопасности
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '🔧 Изменить Access Key',
+            callback_data: 'admin_change_access_key',
+          },
+        ],
+        [
+          {
+            text: '🔧 Изменить Secret Key',
+            callback_data: 'admin_change_secret_key',
+          },
+        ],
+        [{ text: '◀️ Назад', callback_data: 'admin_api_keys' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, {
+      reply_markup: keyboard,
+      parse_mode: 'Markdown',
+    });
+  }
+
+  private handleChangeAccessKey(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+🔧 ИЗМЕНЕНИЕ ACCESS KEY
+
+Отправьте новый Access Key для Kling AI API.
+
+⚠️ ВАЖНО:
+• Убедитесь, что ключ корректный
+• После изменения все новые генерации будут использовать новый ключ
+• Текущие генерации могут не пострадать
+
+Отправьте новый Access Key:
+    `;
+
+    this.bot.sendMessage(chatId, text);
+    this.userStates.set(chatId, { state: 'awaiting_access_key' });
+  }
+
+  private handleChangeSecretKey(chatId: number, userId?: number) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+🔧 ИЗМЕНЕНИЕ SECRET KEY
+
+Отправьте новый Secret Key для Kling AI API.
+
+⚠️ ВАЖНО:
+• Убедитесь, что ключ корректный
+• После изменения все новые генерации будут использовать новый ключ
+• Secret Key используется для подписи JWT токенов
+
+Отправьте новый Secret Key:
+    `;
+
+    this.bot.sendMessage(chatId, text);
+    this.userStates.set(chatId, { state: 'awaiting_secret_key' });
+  }
+
+  private async handleNewAccessKey(chatId: number, text: string) {
+    const newAccessKey = text.trim();
+
+    if (!newAccessKey || newAccessKey.length < 10) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Access Key слишком короткий. Введите корректный ключ.',
+      );
+      return;
+    }
+
+    try {
+      // Update the access key (this will save to database and update KlingAiService)
+      await this.updateKlingAccessKey(newAccessKey);
+
+      const maskedKey = `${newAccessKey.substring(0, 6)}***${newAccessKey.substring(newAccessKey.length - 4)}`;
+
+      const successText = `
+✅ ACCESS KEY ОБНОВЛЕН!
+
+🔑 Новый Access Key: \`${maskedKey}\`
+
+Ключ успешно применен к Kling AI сервису.
+Новые генерации будут использовать обновленный ключ.
+      `;
+
+      this.bot.sendMessage(chatId, successText, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '◀️ Назад к API ключам',
+                callback_data: 'admin_api_keys',
+              },
+            ],
+          ],
+        },
+      });
+
+      this.userStates.delete(chatId);
+      this.logger.log(`Access key updated by admin ${chatId}`);
+    } catch (error) {
+      this.logger.error('Error updating access key:', error);
+      this.bot.sendMessage(
+        chatId,
+        '❌ Ошибка при обновлении ключа. Попробуйте еще раз.',
+      );
+    }
+  }
+
+  private async handleNewSecretKey(chatId: number, text: string) {
+    const newSecretKey = text.trim();
+
+    if (!newSecretKey || newSecretKey.length < 10) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Secret Key слишком короткий. Введите корректный ключ.',
+      );
+      return;
+    }
+
+    try {
+      // Update the secret key (this will save to database and update KlingAiService)
+      await this.updateKlingSecretKey(newSecretKey);
+
+      const maskedKey = `${newSecretKey.substring(0, 6)}***${newSecretKey.substring(newSecretKey.length - 4)}`;
+
+      const successText = `
+✅ SECRET KEY ОБНОВЛЕН!
+
+🔐 Новый Secret Key: \`${maskedKey}\`
+
+Ключ успешно применен к Kling AI сервису.
+Новые генерации будут использовать обновленный ключ для JWT подписи.
+      `;
+
+      this.bot.sendMessage(chatId, successText, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '◀️ Назад к API ключам',
+                callback_data: 'admin_api_keys',
+              },
+            ],
+          ],
+        },
+      });
+
+      this.userStates.delete(chatId);
+      this.logger.log(`Secret key updated by admin ${chatId}`);
+    } catch (error) {
+      this.logger.error('Error updating secret key:', error);
+      this.bot.sendMessage(
+        chatId,
+        '❌ Ошибка при обновлении ключа. Попробуйте еще раз.',
+      );
+    }
+  }
+
+  // Database methods for storing Kling AI keys
+
+  public async updateKlingAccessKey(newAccessKey: string): Promise<void> {
+    await this.klingAiService.updateAccessKey(newAccessKey);
+  }
+
+  public async updateKlingSecretKey(newSecretKey: string): Promise<void> {
+    await this.klingAiService.updateSecretKey(newSecretKey);
+  }
+
+  // Database methods
+  private async registerUser(user: TelegramBot.User): Promise<void> {
+    try {
+      const telegramId = user.id.toString();
+
+      // Try to find existing user
+      const existingUser = await this.prisma.user.findUnique({
+        where: { telegramId },
+      });
+
+      if (existingUser) {
+        // Update existing user's last activity and info
+        await this.prisma.user.update({
+          where: { telegramId },
+          data: {
+            username: user.username || null,
+            firstName: user.first_name || null,
+            lastName: user.last_name || null,
+            languageCode: user.language_code || null,
+            isPremium: (user as any).is_premium || false,
+            lastActiveAt: new Date(),
+          },
+        });
+
+        this.logger.log(
+          `Updated existing user: ${telegramId} (${user.username || user.first_name})`,
+        );
+      } else {
+        // Create new user
+        await this.prisma.user.create({
+          data: {
+            telegramId,
+            username: user.username || null,
+            firstName: user.first_name || null,
+            lastName: user.last_name || null,
+            languageCode: user.language_code || null,
+            isBot: user.is_bot || false,
+            isPremium: (user as any).is_premium || false,
+            userType: 'NEW_ID',
+            lastActiveAt: new Date(),
+          },
+        });
+
+        this.logger.log(
+          `Registered new user: ${telegramId} (${user.username || user.first_name})`,
+        );
+
+        // Add to in-memory group tracking for compatibility
+        this.addUserToGroup(user.id, 'new_id');
+      }
+    } catch (error) {
+      this.logger.error('Error registering user:', error);
+    }
   }
 }

@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  telegramId  String   @unique
+  username    String?
+  firstName   String?
+  lastName    String?
+  languageCode String?
+  isBot       Boolean  @default(false)
+  isPremium   Boolean  @default(false)
+  
+  // User classification
+  userType    String   @default("NEW_ID") // NEW_ID, HIGH_INTENT, NEVER_PAID
+  
+  // Subscription info
+  isSubscribed Boolean  @default(false)
+  subscriptionExpiry DateTime?
+  
+  // Activity tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastActiveAt DateTime @default(now())
+  
+  // Video generation stats
+  videosGenerated Int @default(0)
+  tokensUsed     Int @default(0)
+  
+  @@map("users")
+}
+
+model Video {
+  id          Int      @id @default(autoincrement())
+  telegramId  String
+  videoId     String?  // Kling AI video ID
+  prompt      String
+  quality     String   // standard, pro, master
+  duration    Int      // 5 or 10
+  aspectRatio String   // 1:1, 9:16, 16:9
+  status      String   @default("pending") // pending, processing, completed, failed
+  fileUrl     String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("videos")
+}
+
+model KlingConfig {
+  id        Int      @id @default(autoincrement())
+  accessKey String
+  secretKey String
+  updatedAt DateTime @updatedAt
+  
+  @@map("kling_config")
+}
