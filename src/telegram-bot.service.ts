@@ -204,22 +204,19 @@ export class TelegramBotService {
 
     const keyboard = {
       inline_keyboard: [
+        [{ text: '💎 СТАРТ', callback_data: 'subscription_start' }],
+        [{ text: '💎 ПРОДВИНУТЫЙ', callback_data: 'subscription_advanced' }],
+        [{ text: '💎 ПРОФИ', callback_data: 'subscription_pro' }],
         [
-          { text: '💎 СТАРТ', callback_data: 'subscription_start' },
-        ],
-        [
-          { text: '💎 ПРОДВИНУТЫЙ', callback_data: 'subscription_advanced' },
-        ],
-        [
-          { text: '💎 ПРОФИ', callback_data: 'subscription_pro' },
-        ],
-        [
-          { text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ', callback_data: 'additional_packages' },
+          {
+            text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
+            callback_data: 'additional_packages',
+          },
         ],
         [
           { text: 'Отменить подписку', callback_data: 'cancel_subscription' },
-          { text: 'Назад', callback_data: 'main' }
-        ]
+          { text: 'Назад', callback_data: 'main' },
+        ],
       ],
     };
 
@@ -726,10 +723,27 @@ ID: #${videoId}
         }
 
         if (status.status === 'completed' && status.videoUrl) {
-          // Video is ready
-          await this.bot.sendMessage(
-            chatId,
-            `
+          // Video is ready - send video with caption and buttons
+          try {
+            await this.bot.sendVideo(chatId, status.videoUrl, {
+              caption: `🎉 Ваше видео готово!
+
+Видео #${videoId} | Стоимость: ${cost} токенов
+
+Спасибо за использование нашего сервиса!`,
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            });
+          } catch (videoError) {
+            this.logger.warn('Could not send video directly:', videoError);
+            // Fallback - send text message with download link if video sending fails
+            await this.bot.sendMessage(
+              chatId,
+              `
 🎉 Ваше видео готово!
 
 ID: #${videoId}
@@ -737,24 +751,16 @@ ID: #${videoId}
 📱 Скачать: ${status.videoUrl}
 
 Спасибо за использование нашего сервиса!
-          `,
-            {
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
-                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
-                ],
+            `,
+              {
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
+                    [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                  ],
+                },
               },
-            },
-          );
-
-          // Try to send the video directly if it's accessible
-          try {
-            await this.bot.sendVideo(chatId, status.videoUrl, {
-              caption: `Видео #${videoId} | Стоимость: ${cost} токенов`,
-            });
-          } catch (videoError) {
-            this.logger.warn('Could not send video directly:', videoError);
+            );
           }
 
           return;
@@ -1130,7 +1136,10 @@ ${
     return `[${filled}${empty}`;
   }
 
-  private handleSubscriptionPlan(chatId: number, plan: 'start' | 'advanced' | 'pro') {
+  private handleSubscriptionPlan(
+    chatId: number,
+    plan: 'start' | 'advanced' | 'pro',
+  ) {
     const plans = {
       start: {
         name: '💎 СТАРТ',
@@ -1138,7 +1147,7 @@ ${
         images: 100,
         price: 1200,
         description: 'Базовый пакет • идеален для тестирования',
-        oldPrice: undefined as number | undefined
+        oldPrice: undefined as number | undefined,
       },
       advanced: {
         name: '💎 ПРОДВИНУТЫЙ',
@@ -1146,7 +1155,7 @@ ${
         images: 100,
         price: 2230,
         oldPrice: 2400,
-        description: 'Самый популярный вариант'
+        description: 'Самый популярный вариант',
       },
       pro: {
         name: '💎 ПРОФИ',
@@ -1154,13 +1163,14 @@ ${
         images: 200,
         price: 4320,
         oldPrice: 4800,
-        description: 'Приоритетная очередь'
-      }
+        description: 'Приоритетная очередь',
+      },
     };
 
     const selectedPlan = plans[plan];
-    const savingsText = selectedPlan.oldPrice ? 
-      `\n💰 Экономия: ${selectedPlan.oldPrice - selectedPlan.price}₽` : '';
+    const savingsText = selectedPlan.oldPrice
+      ? `\n💰 Экономия: ${selectedPlan.oldPrice - selectedPlan.price}₽`
+      : '';
 
     const text = `
 ${selectedPlan.name}
@@ -1178,14 +1188,12 @@ ${selectedPlan.name}
 
     const keyboard = {
       inline_keyboard: [
-        [
-          { text: '💳 Оформить подписку', callback_data: `purchase_${plan}` }
-        ],
+        [{ text: '💳 Оформить подписку', callback_data: `purchase_${plan}` }],
         [
           { text: '◀️ Назад к тарифам', callback_data: 'balance' },
-          { text: '🏠 Главное меню', callback_data: 'main' }
-        ]
-      ]
+          { text: '🏠 Главное меню', callback_data: 'main' },
+        ],
+      ],
     };
 
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
@@ -1217,17 +1225,13 @@ ${selectedPlan.name}
 
     const keyboard = {
       inline_keyboard: [
-        [
-          { text: '🎬 Купить видео пакет', callback_data: 'buy_video_package' }
-        ],
-        [
-          { text: '📸 Купить изображения', callback_data: 'buy_image_package' }
-        ],
+        [{ text: '🎬 Купить видео пакет', callback_data: 'buy_video_package' }],
+        [{ text: '📸 Купить изображения', callback_data: 'buy_image_package' }],
         [
           { text: '◀️ Назад', callback_data: 'balance' },
-          { text: '🏠 Главное меню', callback_data: 'main' }
-        ]
-      ]
+          { text: '🏠 Главное меню', callback_data: 'main' },
+        ],
+      ],
     };
 
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
@@ -1250,13 +1254,16 @@ ${selectedPlan.name}
     const keyboard = {
       inline_keyboard: [
         [
-          { text: '✅ Да, отменить подписку', callback_data: 'confirm_cancel_subscription' }
+          {
+            text: '✅ Да, отменить подписку',
+            callback_data: 'confirm_cancel_subscription',
+          },
         ],
         [
           { text: '◀️ Назад', callback_data: 'balance' },
-          { text: '🏠 Главное меню', callback_data: 'main' }
-        ]
-      ]
+          { text: '🏠 Главное меню', callback_data: 'main' },
+        ],
+      ],
     };
 
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
