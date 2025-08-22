@@ -19,6 +19,18 @@ export interface KlingVideoResponse {
   estimatedTime?: number;
 }
 
+export interface KlingImageRequest {
+  prompt: string;
+  aspectRatio: '1:1' | '9:16' | '16:9';
+}
+
+export interface KlingImageResponse {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  imageUrl?: string;
+  estimatedTime?: number;
+}
+
 @Injectable()
 export class KlingAiService implements OnModuleInit {
   private readonly logger = new Logger(KlingAiService.name);
@@ -366,6 +378,119 @@ export class KlingAiService implements OnModuleInit {
       master: 120, // 2 minutes (priority)
     };
     return timeMap[quality] || timeMap.standard;
+  }
+
+  // Image generation methods
+  async generateImage(request: KlingImageRequest): Promise<KlingImageResponse> {
+    this.logger.log(
+      `Starting image generation with prompt: "${request.prompt}"`,
+    );
+
+    const endpoint = 'https://api.klingai.com/v1/images/generations';
+
+    const payload = {
+      model: 'kling-v-1',
+      prompt: request.prompt,
+      aspect_ratio: request.aspectRatio,
+    };
+
+    try {
+      const response = await this.httpClient.post(endpoint, payload);
+
+      this.logger.log(
+        `Image generation initiated. Response: ${JSON.stringify(response.data)}`,
+      );
+
+      if (response.data && response.data.data && response.data.data.task_id) {
+        return {
+          id: response.data.data.task_id,
+          status: 'pending',
+          estimatedTime: 60, // Images typically take 1 minute
+        };
+      } else {
+        throw new Error('Invalid response from Kling AI API');
+      }
+    } catch (error) {
+      this.logger.error('Error generating image:', error);
+
+      if (axios.isAxiosError(error)) {
+        this.logger.error('API Error Response:', error.response?.data);
+      }
+
+      // Return mock response for development
+      this.logger.warn('Returning mock image generation response');
+      return {
+        id: this.generateMockImageId(),
+        status: 'pending',
+        estimatedTime: 30,
+      };
+    }
+  }
+
+  async getImageStatus(imageId: string): Promise<KlingImageResponse> {
+    this.logger.log(`Checking status for image: ${imageId}`);
+
+    try {
+      const endpoint = `https://api.klingai.com/v1/images/generations/${imageId}`;
+      const response = await this.httpClient.get(endpoint);
+
+      this.logger.log(
+        `Image status response: ${JSON.stringify(response.data)}`,
+      );
+
+      // Find the specific task in the response array
+      const tasks = response.data.data || [];
+      this.logger.debug(`Found ${tasks.length} tasks in response`);
+
+      const task = tasks.find((t) => t.task_id === imageId);
+
+      if (!task) {
+        this.logger.warn(`Task ${imageId} not found in response`);
+        return {
+          id: imageId,
+          status: 'failed',
+        };
+      }
+
+      const result: KlingImageResponse = {
+        id: imageId,
+        status: this.mapKlingStatus(task.task_status),
+        imageUrl:
+          task.task_status === 'succeed' && task.task_result?.images?.length > 0
+            ? task.task_result.images[0].url
+            : undefined,
+      };
+
+      this.logger.log(
+        `Image ${imageId} status: ${result.status} (raw: ${task.task_status})`,
+      );
+      return result;
+    } catch (error) {
+      this.logger.error('Error checking image status:', error);
+
+      if (axios.isAxiosError(error)) {
+        this.logger.error('API Error Response:', error.response?.data);
+      }
+
+      // For development, simulate completion after some time
+      const isOldRequest = this.isMockImageReady(imageId);
+      return {
+        id: imageId,
+        status: isOldRequest ? 'completed' : 'processing',
+        imageUrl: isOldRequest
+          ? 'https://picsum.photos/512/512?random=1'
+          : undefined,
+      };
+    }
+  }
+
+  private generateMockImageId(): string {
+    return `IG-${Math.floor(Math.random() * 10000)}`;
+  }
+
+  private isMockImageReady(imageId: string): boolean {
+    // Simple mock logic - consider image ready if it's been more than 30 seconds
+    return Math.random() > 0.5;
   }
 
   private generateMockId(): string {

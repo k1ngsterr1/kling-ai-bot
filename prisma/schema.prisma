@@ -34,6 +34,7 @@ model User {
   
   // Video generation stats
   videosGenerated Int @default(0)
+  imagesGenerated Int @default(0)
   tokensUsed     Int @default(0)
   
   @@map("users")
@@ -54,6 +55,21 @@ model Video {
   updatedAt   DateTime @updatedAt
   
   @@map("videos")
+}
+
+model Image {
+  id          Int      @id @default(autoincrement())
+  telegramId  String
+  imageId     String?  // Kling AI image ID
+  prompt      String
+  aspectRatio String   // 1:1, 9:16, 16:9
+  status      String   @default("pending") // pending, processing, completed, failed
+  fileUrl     String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("images")
 }
 
 model KlingConfig {

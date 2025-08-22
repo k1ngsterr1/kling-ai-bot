@@ -225,15 +225,26 @@ export class TelegramBotService {
   }
 
   private handleImageCommand(chatId: number) {
+    // Set user state for image generation
+    this.userStates.set(chatId, { state: 'waiting_image_prompt' });
+
     const imageText = `
-🖼 Изображения - создание и редактирование фото
+🖼️ [Изображение] /img
 
-Доступные функции:
-• Генерация изображений по описанию
-• Редактирование существующих фото
-• Улучшение качества изображений
+🌟 Вы используете Kling 2.1 
+📝 Опишите изображение максимально подробно:
 
-Отправьте мне описание изображения или загрузите фото для редактирования.
+✨ Примеры удачных промптов:
+• «Футуристический город на закате, неоновые огни, киберпанк стиль, 8К»
+• «Портрет эльфийской принцессы с золотыми волосами в волшебном лесу»
+• «Космический корабль приближается к неизвестной планете, звёзды»
+
+⚠️ Важно: 
+- Длина промпта: до 300 символов
+- Разрешение: высокое качество
+- Баланс будет списан после выбора параметров
+
+👇 Отправьте описание ниже:
     `;
 
     const keyboard = {
@@ -1114,6 +1125,62 @@ ID: #${videoId}
           [{ text: '⚙️ Настройки генерации', callback_data: 'video_settings' }],
           [{ text: '🔙 Назад к видео', callback_data: 'video' }],
           [{ text: '🏠 Главное меню', callback_data: 'main' }],
+        ],
+      };
+
+      this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      return;
+    }
+
+    if (userState?.state === 'waiting_image_prompt') {
+      // User is in image generation flow
+      if (text.length > 300) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
+        );
+        return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
+      }
+
+      // Save the prompt and show aspect ratio selection
+      this.userStates.set(chatId, {
+        state: 'image_prompt_received',
+        data: { prompt: text },
+      });
+
+      const responseText = `
+✅ Промпт получен: "${text}"
+
+📐 Выберите соотношение сторон для изображения:
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '⬜ 1:1 (квадрат)', callback_data: 'image_ratio_1:1' },
+            {
+              text: '📱 9:16 (вертикальное)',
+              callback_data: 'image_ratio_9:16',
+            },
+          ],
+          [
+            {
+              text: '🖥️ 16:9 (горизонтальное)',
+              callback_data: 'image_ratio_16:9',
+            },
+          ],
+          [
+            { text: '🔙 Назад к изображениям', callback_data: 'image' },
+            { text: '🏠 Главное меню', callback_data: 'main' },
+          ],
         ],
       };
 
