@@ -61,6 +61,7 @@ export class KlingAiService implements OnModuleInit {
       if (config) {
         this.accessKey = config.accessKey;
         this.secretKey = config.secretKey;
+        this.logger.log('Using Kling keys from database');
       } else {
         // Fallback to environment variables
         this.accessKey =
@@ -70,9 +71,17 @@ export class KlingAiService implements OnModuleInit {
           this.configService.get<string>('KLING_SECRET_KEY') ||
           'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
 
+        this.logger.log('Using Kling keys from environment/fallback');
         // Save initial config to database
         await this.saveKlingConfig();
       }
+
+      this.logger.log(
+        `Using Access Key: ${this.accessKey?.substring(0, 8)}...`,
+      );
+      this.logger.log(
+        `Using Secret Key: ${this.secretKey?.substring(0, 8)}...`,
+      );
     } catch (error) {
       this.logger.error('Error loading Kling config:', error);
       this.accessKey =
@@ -81,6 +90,16 @@ export class KlingAiService implements OnModuleInit {
       this.secretKey =
         this.configService.get<string>('KLING_SECRET_KEY') ||
         'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
+
+      this.logger.log(
+        'Using Kling keys from environment/fallback (after error)',
+      );
+      this.logger.log(
+        `Using Access Key: ${this.accessKey?.substring(0, 8)}...`,
+      );
+      this.logger.log(
+        `Using Secret Key: ${this.secretKey?.substring(0, 8)}...`,
+      );
     }
   }
 
