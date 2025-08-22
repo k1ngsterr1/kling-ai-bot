@@ -606,15 +606,17 @@ export class KlingAiService implements OnModuleInit {
     try {
       const result = await this.retryRequest(
         async () => {
-          const endpoint = `/v1/images/generations/${imageId}`;
-
-          // Add specific timeout for status check
-          const response = await this.httpClient.get(endpoint, {
+          // Use the list endpoint instead of direct task ID endpoint
+          const response = await this.httpClient.get('/v1/images/generations', {
+            params: {
+              page: 1,
+              size: 20, // Get more tasks to find our ID
+            },
             timeout: 30000, // 30 seconds timeout for status check
           });
 
           this.logger.log(
-            `Image status response: ${JSON.stringify(response.data)}`,
+            `Image list response: ${JSON.stringify(response.data)}`,
           );
 
           // Find the specific task in the response array
@@ -625,9 +627,10 @@ export class KlingAiService implements OnModuleInit {
 
           if (!task) {
             this.logger.warn(`Task ${imageId} not found in response`);
+            // Maybe the task is on another page or older, return processing to continue polling
             return {
               id: imageId,
-              status: 'failed' as const,
+              status: 'processing' as const,
             };
           }
 
@@ -706,10 +709,12 @@ export class KlingAiService implements OnModuleInit {
       // Use the same logic as getImageStatus with retry mechanism
       const result = await this.retryRequest(
         async () => {
-          const endpoint = `/v1/images/generations/${imageId}`;
-
-          // Use the configured httpClient which has JWT auth interceptor
-          const response = await this.httpClient.get(endpoint, {
+          // Use the list endpoint instead of direct task ID endpoint
+          const response = await this.httpClient.get('/v1/images/generations', {
+            params: {
+              page: 1,
+              size: 20, // Get more tasks to find our ID
+            },
             timeout: 15000, // 15 seconds timeout
           });
 
