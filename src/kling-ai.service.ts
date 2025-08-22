@@ -537,8 +537,6 @@ export class KlingAiService implements OnModuleInit {
     this.logger.log(`Using Access Key: ${this.accessKey?.substring(0, 8)}...`);
     this.logger.log(`Using Secret Key: ${this.secretKey?.substring(0, 8)}...`);
 
-    const endpoint = 'https://api.klingai.com/v1/images/generations';
-
     const payload = {
       model: 'kling-v-1',
       prompt: request.prompt,
@@ -551,7 +549,11 @@ export class KlingAiService implements OnModuleInit {
     );
 
     try {
-      const response = await this.httpClient.post(endpoint, payload);
+      // Use relative path so httpClient interceptors handle auth
+      const response = await this.httpClient.post(
+        '/v1/images/generations',
+        payload,
+      );
 
       this.logger.log(
         `Image generation initiated. Response: ${JSON.stringify(response.data)}`,
@@ -604,7 +606,7 @@ export class KlingAiService implements OnModuleInit {
     try {
       const result = await this.retryRequest(
         async () => {
-          const endpoint = `https://api.klingai.com/v1/images/generations/${imageId}`;
+          const endpoint = `/v1/images/generations/${imageId}`;
 
           // Add specific timeout for status check
           const response = await this.httpClient.get(endpoint, {
