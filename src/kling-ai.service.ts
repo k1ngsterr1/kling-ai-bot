@@ -397,6 +397,9 @@ export class KlingAiService implements OnModuleInit {
       `Starting image generation with prompt: "${request.prompt}"`,
     );
 
+    this.logger.log(`Using Access Key: ${this.accessKey?.substring(0, 8)}...`);
+    this.logger.log(`Using Secret Key: ${this.secretKey?.substring(0, 8)}...`);
+
     const endpoint = 'https://api.klingai.com/v1/images/generations';
 
     const payload = {
