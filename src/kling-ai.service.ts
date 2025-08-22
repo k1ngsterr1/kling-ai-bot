@@ -394,6 +394,11 @@ export class KlingAiService implements OnModuleInit {
       aspect_ratio: request.aspectRatio,
     };
 
+    this.logger.log(
+      'Sending image generation request to Kling AI:',
+      JSON.stringify(payload, null, 2),
+    );
+
     try {
       const response = await this.httpClient.post(endpoint, payload);
 
@@ -414,11 +419,26 @@ export class KlingAiService implements OnModuleInit {
       this.logger.error('Error generating image:', error);
 
       if (axios.isAxiosError(error)) {
-        this.logger.error('API Error Response:', error.response?.data);
+        this.logger.error('API Error Status:', error.response?.status);
+        this.logger.error('API Error Headers:', error.response?.headers);
+        this.logger.error(
+          'API Error Response:',
+          JSON.stringify(error.response?.data, null, 2),
+        );
+        this.logger.error('API Error Config:', {
+          url: error.config?.url,
+          method: error.config?.method,
+          headers: error.config?.headers,
+        });
       }
 
       // Return mock response for development
-      this.logger.warn('Returning mock image generation response');
+      this.logger.warn(
+        'Returning mock image generation response due to API error',
+      );
+      this.logger.warn(
+        'This means the API call failed and you are seeing a placeholder image',
+      );
       return {
         id: this.generateMockImageId(),
         status: 'pending',
@@ -473,6 +493,9 @@ export class KlingAiService implements OnModuleInit {
       }
 
       // For development, simulate completion after some time
+      this.logger.warn(
+        `Mock image status check for ${imageId} - this is not a real generation result`,
+      );
       const isOldRequest = this.isMockImageReady(imageId);
       return {
         id: imageId,

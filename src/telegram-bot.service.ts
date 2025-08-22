@@ -845,6 +845,10 @@ export class TelegramBotService {
 
     const { prompt, aspectRatio } = userState.data;
 
+    this.logger.log(
+      `Generating image with prompt: "${prompt}" and aspectRatio: ${aspectRatio}`,
+    );
+
     try {
       // Create Kling AI request for image
       const klingRequest: KlingImageRequest = {
@@ -857,13 +861,35 @@ export class TelegramBotService {
         await this.klingAiService.generateImage(klingRequest);
 
       if (generationResult.status === 'pending') {
-        this.bot.sendMessage(
+        // Send initial progress message
+        const initialText = `
+⏳ Генерация изображения началась!
+Примерное время: 1-2 мин
+Текущий статус: [▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 0%]
+
+🔔 Мы пришлем результат сразу как он будет готов
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🏠 Главное меню', callback_data: 'main' }],
+          ],
+        };
+
+        const progressMessage = await this.bot.sendMessage(
           chatId,
-          `🎨 Генерация изображения началась!\n\n⏱️ Ожидаемое время: ${generationResult.estimatedTime || 60} секунд\n\n🆔 ID задачи: ${generationResult.id}`,
+          initialText,
+          {
+            reply_markup: keyboard,
+          },
         );
 
-        // Start polling for completion
-        this.pollImageGeneration(chatId, generationResult.id);
+        // Start polling for completion with progress updates
+        this.pollImageGeneration(
+          chatId,
+          generationResult.id,
+          progressMessage.message_id,
+        );
       } else {
         this.bot.sendMessage(
           chatId,
@@ -1141,7 +1167,11 @@ ID: #${videoId}
     setTimeout(poll, 30000);
   }
 
-  private async pollImageGeneration(chatId: number, imageId: string) {
+  private async pollImageGeneration(
+    chatId: number,
+    imageId: string,
+    progressMessageId: number,
+  ) {
     const maxAttempts = 20; // Poll for up to 10 minutes (20 * 30 seconds)
     let attempts = 0;
 
@@ -1151,13 +1181,48 @@ ID: #${videoId}
       try {
         const status = await this.klingAiService.getImageStatus(imageId);
 
+        // Calculate progress based on attempts and status
+        const progress = this.calculateProgress(
+          attempts,
+          maxAttempts,
+          status.status,
+        );
+        const progressBar = this.createProgressBar(progress);
+
+        // Update progress message
+        const estimatedMinutes = Math.ceil(120 / 60); // 2 minutes default for images
+        const updatedText = `
+⏳ Генерация изображения началась!
+Примерное время: ${estimatedMinutes}-${estimatedMinutes + 1} мин
+Текущий статус: ${progressBar} ${progress}%]
+
+🔔 Мы пришлем результат сразу как он будет готов
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🏠 Главное меню', callback_data: 'main' }],
+          ],
+        };
+
+        // Update the progress message
+        try {
+          await this.bot.editMessageText(updatedText, {
+            chat_id: chatId,
+            message_id: progressMessageId,
+            reply_markup: keyboard,
+          });
+        } catch (editError) {
+          this.logger.warn('Could not update progress message:', editError);
+        }
+
         if (status.status === 'completed' && status.imageUrl) {
           // Image is ready - send image with caption and buttons
           try {
             await this.bot.sendPhoto(chatId, status.imageUrl, {
               caption: `🎉 Ваше изображение готово!
 
-ID: #${imageId}
+⚠️ ВНИМАНИЕ: Это тестовое изображение, так как API генерации недоступен.
 💰 Списано: 1 токен
 
 Спасибо за использование нашего сервиса!`,
@@ -1178,15 +1243,13 @@ ID: #${imageId}
             // Fallback - send text message with download link if image sending fails
             await this.bot.sendMessage(
               chatId,
-              `
-🎉 Ваше изображение готово!
+              `🎉 Ваше изображение готово!
 
-ID: #${imageId}
+⚠️ ВНИМАНИЕ: Это тестовое изображение, так как API генерации недоступен.
 💰 Списано: 1 токен
 📱 Скачать: ${status.imageUrl}
 
-Спасибо за использование нашего сервиса!
-            `,
+Спасибо за использование нашего сервиса!`,
               {
                 reply_markup: {
                   inline_keyboard: [
@@ -1202,23 +1265,19 @@ ID: #${imageId}
               },
             );
           }
-
           return;
         } else if (status.status === 'failed') {
           // Generation failed
           await this.bot.sendMessage(
             chatId,
-            `
-❌ Генерация изображения не удалась
+            `❌ Генерация изображения не удалась
 
-ID: #${imageId}
 Возможные причины:
 • Некорректный промпт
 • Технические проблемы
 • Превышен лимит времени
 
-💰 Токен возвращен на ваш баланс.
-          `,
+💰 Токен возвращен на ваш баланс.`,
             {
               reply_markup: {
                 inline_keyboard: [
@@ -1233,13 +1292,10 @@ ID: #${imageId}
           // Timeout
           await this.bot.sendMessage(
             chatId,
-            `
-⏰ Превышено время ожидания
+            `⏰ Превышено время ожидания
 
-ID: #${imageId}
 Генерация может все еще продолжаться.
-Проверьте результат позже или обратитесь в поддержку.
-          `,
+Проверьте результат позже или обратитесь в поддержку.`,
             {
               reply_markup: {
                 inline_keyboard: [
@@ -1261,12 +1317,9 @@ ID: #${imageId}
         } else {
           await this.bot.sendMessage(
             chatId,
-            `
-❌ Ошибка проверки статуса изображения
+            `❌ Ошибка проверки статуса изображения
 
-ID: #${imageId}
-Обратитесь в поддержку для получения результата.
-          `,
+Обратитесь в поддержку для получения результата.`,
           );
         }
       }
