@@ -901,10 +901,19 @@ export class TelegramBotService {
       this.userStates.delete(chatId);
     } catch (error) {
       this.logger.error('Error generating image:', error);
-      this.bot.sendMessage(
-        chatId,
-        '❌ Произошла ошибка при генерации изображения. Попробуйте позже.',
-      );
+
+      // Check if error is related to API keys
+      if (error.message?.includes('API keys not configured')) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ API ключи Kling AI не настроены!\n\nОбратитесь к администратору для настройки ключей через /admin',
+        );
+      } else {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Произошла ошибка при генерации изображения. Попробуйте позже.',
+        );
+      }
     }
   }
 
@@ -980,18 +989,34 @@ ID: #${generationResult.id}
       );
     } catch (error) {
       this.logger.error('Error starting video generation:', error);
-      this.bot.sendMessage(
-        chatId,
-        '❌ Ошибка при запуске генерации. Попробуйте еще раз.',
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🔄 Попробовать снова', callback_data: 'video' }],
-              [{ text: '🏠 Главное меню', callback_data: 'main' }],
-            ],
+
+      // Check if error is related to API keys
+      if (error.message?.includes('API keys not configured')) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ API ключи Kling AI не настроены!\n\nОбратитесь к администратору для настройки ключей через /admin',
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
           },
-        },
-      );
+        );
+      } else {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Ошибка при запуске генерации. Попробуйте еще раз.',
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Попробовать снова', callback_data: 'video' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
+        );
+      }
     }
   }
 
@@ -1050,24 +1075,19 @@ ID: #${videoId}
         if (status.status === 'completed' && status.videoUrl) {
           // Video is ready - send video with caption and buttons
           try {
-            // Send as video first
+            // Send as video only
             await this.bot.sendVideo(chatId, status.videoUrl, {
               caption: `🎉 Ваше видео готово!
 
 Видео #${videoId} | Стоимость: ${cost} токенов
 
-📺 Видео для просмотра`,
+📺 Спасибо за использование нашего сервиса!`,
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🎬 Создать еще видео', callback_data: 'video' }],
                   [{ text: '🏠 Главное меню', callback_data: 'main' }],
                 ],
               },
-            });
-
-            // Send as document/file for download
-            await this.bot.sendDocument(chatId, status.videoUrl, {
-              caption: `📁 Файл для скачивания\n\nСпасибо за использование нашего сервиса!`,
             });
           } catch (videoError) {
             this.logger.warn('Could not send video directly:', videoError);
@@ -1701,23 +1721,8 @@ ${
   // Public method to send videos
   async sendVideo(chatId: number, video: any, options?: any) {
     try {
-      // Send as video first
+      // Send only as video
       const videoResult = await this.bot.sendVideo(chatId, video, options);
-
-      // If it's a URL (not file_id), also send as document for download
-      if (
-        typeof video === 'string' &&
-        (video.startsWith('http') || video.startsWith('https'))
-      ) {
-        try {
-          await this.bot.sendDocument(chatId, video, {
-            caption: '📁 Файл для скачивания',
-          });
-        } catch (docError) {
-          this.logger.warn('Could not send video as document:', docError);
-        }
-      }
-
       return videoResult;
     } catch (error) {
       this.logger.error('Error sending video:', error);

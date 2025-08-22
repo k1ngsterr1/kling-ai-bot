@@ -53,53 +53,29 @@ export class KlingAiService implements OnModuleInit {
 
   private async loadKlingConfig() {
     try {
-      // Try to load from database first
+      // Load from database ONLY
       const config = await this.prisma.klingConfig.findFirst({
         orderBy: { updatedAt: 'desc' },
       });
 
-      if (config) {
+      if (config && config.accessKey && config.secretKey) {
         this.accessKey = config.accessKey;
         this.secretKey = config.secretKey;
-        this.logger.log('Using Kling keys from database');
+        this.logger.log('✅ Using Kling keys from database');
+        this.logger.log(`Access Key: ${this.accessKey.substring(0, 8)}...`);
+        this.logger.log(`Secret Key: ${this.secretKey.substring(0, 8)}...`);
       } else {
-        // Fallback to environment variables
-        this.accessKey =
-          this.configService.get<string>('KLING_ACCESS_KEY') ||
-          'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
-        this.secretKey =
-          this.configService.get<string>('KLING_SECRET_KEY') ||
-          'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
-
-        this.logger.log('Using Kling keys from environment/fallback');
-        // Save initial config to database
-        await this.saveKlingConfig();
+        this.logger.warn('❌ No Kling API keys found in database!');
+        this.logger.warn(
+          'Please configure API keys using admin panel (/admin)',
+        );
+        this.accessKey = '';
+        this.secretKey = '';
       }
-
-      this.logger.log(
-        `Using Access Key: ${this.accessKey?.substring(0, 8)}...`,
-      );
-      this.logger.log(
-        `Using Secret Key: ${this.secretKey?.substring(0, 8)}...`,
-      );
     } catch (error) {
-      this.logger.error('Error loading Kling config:', error);
-      this.accessKey =
-        this.configService.get<string>('KLING_ACCESS_KEY') ||
-        'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
-      this.secretKey =
-        this.configService.get<string>('KLING_SECRET_KEY') ||
-        'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
-
-      this.logger.log(
-        'Using Kling keys from environment/fallback (after error)',
-      );
-      this.logger.log(
-        `Using Access Key: ${this.accessKey?.substring(0, 8)}...`,
-      );
-      this.logger.log(
-        `Using Secret Key: ${this.secretKey?.substring(0, 8)}...`,
-      );
+      this.logger.error('Error loading Kling config from database:', error);
+      this.accessKey = '';
+      this.secretKey = '';
     }
   }
 
@@ -194,6 +170,14 @@ export class KlingAiService implements OnModuleInit {
   }
 
   async generateVideo(request: KlingVideoRequest): Promise<KlingVideoResponse> {
+    // Check if API keys are configured
+    if (!this.accessKey || !this.secretKey) {
+      this.logger.error('❌ Kling API keys not configured!');
+      throw new Error(
+        'API keys not configured. Please set them via admin panel.',
+      );
+    }
+
     try {
       this.logger.log(
         `Starting video generation with prompt: "${request.prompt}"`,
@@ -401,6 +385,14 @@ export class KlingAiService implements OnModuleInit {
 
   // Image generation methods
   async generateImage(request: KlingImageRequest): Promise<KlingImageResponse> {
+    // Check if API keys are configured
+    if (!this.accessKey || !this.secretKey) {
+      this.logger.error('❌ Kling API keys not configured!');
+      throw new Error(
+        'API keys not configured. Please set them via admin panel.',
+      );
+    }
+
     this.logger.log(
       `Starting image generation with prompt: "${request.prompt}"`,
     );
