@@ -697,6 +697,79 @@ export class KlingAiService implements OnModuleInit {
     }
   }
 
+  async getImageResult(imageId: string): Promise<KlingImageResponse | null> {
+    this.logger.log(`Getting final result for image: ${imageId}`);
+
+    try {
+      // Use the same logic as getImageStatus with retry mechanism
+      const result = await this.retryRequest(
+        async () => {
+          const endpoint = `/v1/images/generations/${imageId}`;
+
+          // Use the configured httpClient which has JWT auth interceptor
+          const response = await this.httpClient.get(endpoint, {
+            timeout: 15000, // 15 seconds timeout
+          });
+
+          this.logger.log(
+            `Image result response: ${JSON.stringify(response.data)}`,
+          );
+
+          // Find the specific task in the response array
+          const tasks = response.data.data || [];
+          const task = tasks.find((t) => t.task_id === imageId);
+
+          if (!task) {
+            this.logger.warn(`Task ${imageId} not found in final result`);
+            return null;
+          }
+
+          // Only return if we have a completed image
+          if (
+            task.task_status === 'succeed' &&
+            task.task_result?.images?.length > 0
+          ) {
+            const result: KlingImageResponse = {
+              id: imageId,
+              status: 'completed',
+              imageUrl: task.task_result.images[0].url,
+            };
+
+            this.logger.log(
+              `Got final result for image ${imageId}: ${result.imageUrl}`,
+            );
+            return result;
+          }
+
+          this.logger.log(
+            `Image ${imageId} not yet ready: status=${task.task_status}`,
+          );
+          return null;
+        },
+        2,
+        2000,
+      ); // 2 retries with 2 second base delay
+
+      return result;
+    } catch (error) {
+      this.logger.error('Error getting image result:', {
+        imageId,
+        error: error.message,
+        code: error.code,
+      });
+
+      if (axios.isAxiosError(error)) {
+        this.logger.error('API Error Response:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+        });
+      }
+
+      return null;
+    }
+  }
+
   private generateMockImageId(): string {
     return `IG-${Math.floor(Math.random() * 10000)}`;
   }

@@ -885,9 +885,9 @@ export class TelegramBotService {
         const initialText = `
 ⏳ Генерация изображения началась!
 Примерное время: 1-2 мин
-Текущий статус: [██████████████▒ 90%]
+ID: ${generationResult.id}
 
-🔔 Обработка завершается...
+🔔 Мы пришлем результат сразу как он будет готов
         `;
 
         const keyboard = {
@@ -896,65 +896,20 @@ export class TelegramBotService {
           ],
         };
 
-        await this.bot.sendMessage(chatId, initialText, {
-          reply_markup: keyboard,
-        });
+        const progressMessage = await this.bot.sendMessage(
+          chatId,
+          initialText,
+          {
+            reply_markup: keyboard,
+          },
+        );
 
-        // Wait a bit to simulate processing
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // Send the final result directly (mock image)
-        const mockImageUrl =
-          'https://picsum.photos/512/512?random=' +
-          Math.floor(Math.random() * 1000);
-
-        try {
-          await this.bot.sendPhoto(chatId, mockImageUrl, {
-            caption: `🎉 Ваше изображение готово!
-
-⚠️ ВНИМАНИЕ: Это демо-изображение для тестирования.
-💰 Списано: 1 токен
-
-Спасибо за использование нашего сервиса!`,
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🖼 Создать еще изображение',
-                    callback_data: 'image',
-                  },
-                ],
-                [{ text: '🏠 Главное меню', callback_data: 'main' }],
-              ],
-            },
-          });
-        } catch (imageError) {
-          this.logger.warn('Could not send image directly:', imageError);
-          // Fallback - send text message with download link if image sending fails
-          await this.bot.sendMessage(
-            chatId,
-            `🎉 Ваше изображение готово!
-
-⚠️ ВНИМАНИЕ: Это демо-изображение для тестирования.
-💰 Списано: 1 токен
-📱 Скачать: ${mockImageUrl}
-
-Спасибо за использование нашего сервиса!`,
-            {
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '🖼 Создать еще изображение',
-                      callback_data: 'image',
-                    },
-                  ],
-                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
-                ],
-              },
-            },
-          );
-        }
+        // Start polling for completion without status check (wait fixed time)
+        this.pollImageGenerationWithoutStatus(
+          chatId,
+          generationResult.id,
+          progressMessage.message_id,
+        );
       } else {
         this.bot.sendMessage(
           chatId,
@@ -1405,6 +1360,170 @@ ID: #${videoId}
             `❌ Ошибка проверки статуса изображения
 
 Обратитесь в поддержку для получения результата.`,
+          );
+        }
+      }
+    };
+
+    // Start polling after initial delay
+    setTimeout(poll, 30000);
+  }
+
+  private async pollImageGenerationWithoutStatus(
+    chatId: number,
+    imageId: string,
+    progressMessageId: number,
+  ) {
+    const maxAttempts = 10; // Wait up to 5 minutes (10 * 30 seconds)
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+
+      try {
+        // Calculate progress based on attempts
+        const progress = Math.min(
+          95,
+          Math.floor((attempts / maxAttempts) * 100),
+        );
+        const progressBar = this.createProgressBar(progress);
+
+        // Update progress message
+        const updatedText = `
+⏳ Генерация изображения...
+Примерное время: 1-2 мин
+Текущий статус: ${progressBar} ${progress}%]
+
+🔔 Мы пришлем результат сразу как он будет готов
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🏠 Главное меню', callback_data: 'main' }],
+          ],
+        };
+
+        // Update the progress message
+        try {
+          await this.bot.editMessageText(updatedText, {
+            chat_id: chatId,
+            message_id: progressMessageId,
+            reply_markup: keyboard,
+          });
+        } catch (editError) {
+          this.logger.warn('Could not update progress message:', editError);
+        }
+
+        if (attempts >= maxAttempts) {
+          // Try to get actual result from Kling AI
+          try {
+            this.logger.log(
+              `Attempting to get final result for image ${imageId}`,
+            );
+
+            // Try to get the result without status check
+            const result = await this.klingAiService.getImageResult(imageId);
+
+            if (result && result.imageUrl) {
+              // Image is ready - send actual result
+              try {
+                await this.bot.sendPhoto(chatId, result.imageUrl, {
+                  caption: `🎉 Ваше изображение готово!
+
+💰 Списано: 1 токен
+🆔 ID генерации: ${imageId}
+
+Спасибо за использование нашего сервиса!`,
+                  reply_markup: {
+                    inline_keyboard: [
+                      [
+                        {
+                          text: '🖼 Создать еще изображение',
+                          callback_data: 'image',
+                        },
+                      ],
+                      [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                    ],
+                  },
+                });
+                return;
+              } catch (imageError) {
+                this.logger.warn('Could not send image directly:', imageError);
+                // Fallback - send text message with download link
+                await this.bot.sendMessage(
+                  chatId,
+                  `🎉 Ваше изображение готово!
+
+💰 Списано: 1 токен
+🆔 ID генерации: ${imageId}
+📱 Скачать: ${result.imageUrl}
+
+Спасибо за использование нашего сервиса!`,
+                  {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [
+                          {
+                            text: '🖼 Создать еще изображение',
+                            callback_data: 'image',
+                          },
+                        ],
+                        [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                      ],
+                    },
+                  },
+                );
+                return;
+              }
+            }
+          } catch (error) {
+            this.logger.error(
+              `Could not get final result for ${imageId}:`,
+              error,
+            );
+          }
+
+          // If we can't get the result, send timeout message
+          await this.bot.sendMessage(
+            chatId,
+            `⏰ Превышено время ожидания
+
+Генерация может все еще продолжаться.
+Изображение должно появиться в вашем аккаунте Kling AI.
+🆔 ID генерации: ${imageId}`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Попробовать снова', callback_data: 'image' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+          return;
+        }
+
+        // Continue polling
+        setTimeout(poll, 30000); // Poll every 30 seconds
+      } catch (error) {
+        this.logger.error(`Error in image polling for ${imageId}:`, error);
+
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 30000);
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            `❌ Ошибка во время генерации
+
+Обратитесь в поддержку для получения результата.
+🆔 ID генерации: ${imageId}`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
           );
         }
       }
