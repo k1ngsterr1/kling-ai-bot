@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot = require('node-telegram-bot-api');
-import { KlingAiService, KlingVideoRequest } from './kling-ai.service';
+import {
+  KlingAiService,
+  KlingVideoRequest,
+  KlingImageRequest,
+} from './kling-ai.service';
 import { PrismaService } from './prisma.service';
 
 @Injectable()
@@ -415,6 +419,9 @@ export class TelegramBotService {
       case 'confirm_generation':
         this.handleGenerationConfirmation(chatId);
         break;
+      case 'confirm_image_generation':
+        this.handleImageGenerationConfirmation(chatId);
+        break;
       case 'subscription_start':
         this.handleSubscriptionPlan(chatId, 'start');
         break;
@@ -535,6 +542,15 @@ export class TelegramBotService {
         break;
       case 'admin_view_current_keys':
         this.handleViewCurrentKeys(chatId, callbackQuery.from?.id);
+        break;
+      case 'image_ratio_1:1':
+        this.handleImageAspectRatioChoice(chatId, '1:1');
+        break;
+      case 'image_ratio_9:16':
+        this.handleImageAspectRatioChoice(chatId, '9:16');
+        break;
+      case 'image_ratio_16:9':
+        this.handleImageAspectRatioChoice(chatId, '16:9');
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
@@ -766,6 +782,104 @@ export class TelegramBotService {
     };
 
     this.bot.sendMessage(chatId, confirmationText, { reply_markup: keyboard });
+  }
+
+  private handleImageAspectRatioChoice(chatId: number, aspectRatio: string) {
+    const userState = this.userStates.get(chatId);
+
+    if (!userState?.data?.prompt) {
+      this.bot.sendMessage(
+        chatId,
+        'Ошибка: промпт не найден. Начните заново с /img',
+      );
+      return;
+    }
+
+    const { prompt } = userState.data;
+
+    // Save the selected aspect ratio
+    this.userStates.set(chatId, {
+      ...userState,
+      data: { ...userState.data, aspectRatio },
+    });
+
+    const aspectRatioNames = {
+      '1:1': '⬜ 1:1 (квадрат)',
+      '9:16': '📱 9:16 (вертикальное)',
+      '16:9': '🖥️ 16:9 (горизонтальное)',
+    };
+
+    const confirmationText = `
+✅ Ваш заказ на изображение:
+Промпт: "${prompt}"
+Формат: ${aspectRatioNames[aspectRatio]}
+Стоимость: 1 токен
+Текущий баланс: 100 токенов
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '⚡ Начать генерацию',
+            callback_data: 'confirm_image_generation',
+          },
+        ],
+        [{ text: '🔙 Назад к изображениям', callback_data: 'image' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, confirmationText, { reply_markup: keyboard });
+  }
+
+  private async handleImageGenerationConfirmation(chatId: number) {
+    const userState = this.userStates.get(chatId);
+
+    if (!userState?.data?.prompt || !userState?.data?.aspectRatio) {
+      this.bot.sendMessage(
+        chatId,
+        'Ошибка: данные не найдены. Начните заново с /img',
+      );
+      return;
+    }
+
+    const { prompt, aspectRatio } = userState.data;
+
+    try {
+      // Create Kling AI request for image
+      const klingRequest: KlingImageRequest = {
+        prompt,
+        aspectRatio: aspectRatio as '1:1' | '9:16' | '16:9',
+      };
+
+      // Start generation with Kling AI
+      const generationResult =
+        await this.klingAiService.generateImage(klingRequest);
+
+      if (generationResult.status === 'pending') {
+        this.bot.sendMessage(
+          chatId,
+          `🎨 Генерация изображения началась!\n\n⏱️ Ожидаемое время: ${generationResult.estimatedTime || 60} секунд\n\n🆔 ID задачи: ${generationResult.id}`,
+        );
+
+        // Start polling for completion
+        this.pollImageGeneration(chatId, generationResult.id);
+      } else {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Ошибка при запуске генерации. Попробуйте еще раз.',
+        );
+      }
+
+      // Clear user state
+      this.userStates.delete(chatId);
+    } catch (error) {
+      this.logger.error('Error generating image:', error);
+      this.bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка при генерации изображения. Попробуйте позже.',
+      );
+    }
   }
 
   private async handleGenerationConfirmation(chatId: number) {
@@ -1016,6 +1130,141 @@ ID: #${videoId}
 ❌ Ошибка проверки статуса видео
 
 ID: #${videoId}
+Обратитесь в поддержку для получения результата.
+          `,
+          );
+        }
+      }
+    };
+
+    // Start polling after initial delay
+    setTimeout(poll, 30000);
+  }
+
+  private async pollImageGeneration(chatId: number, imageId: string) {
+    const maxAttempts = 20; // Poll for up to 10 minutes (20 * 30 seconds)
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+
+      try {
+        const status = await this.klingAiService.getImageStatus(imageId);
+
+        if (status.status === 'completed' && status.imageUrl) {
+          // Image is ready - send image with caption and buttons
+          try {
+            await this.bot.sendPhoto(chatId, status.imageUrl, {
+              caption: `🎉 Ваше изображение готово!
+
+ID: #${imageId}
+💰 Списано: 1 токен
+
+Спасибо за использование нашего сервиса!`,
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '🖼 Создать еще изображение',
+                      callback_data: 'image',
+                    },
+                  ],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            });
+          } catch (imageError) {
+            this.logger.warn('Could not send image directly:', imageError);
+            // Fallback - send text message with download link if image sending fails
+            await this.bot.sendMessage(
+              chatId,
+              `
+🎉 Ваше изображение готово!
+
+ID: #${imageId}
+💰 Списано: 1 токен
+📱 Скачать: ${status.imageUrl}
+
+Спасибо за использование нашего сервиса!
+            `,
+              {
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      {
+                        text: '🖼 Создать еще изображение',
+                        callback_data: 'image',
+                      },
+                    ],
+                    [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                  ],
+                },
+              },
+            );
+          }
+
+          return;
+        } else if (status.status === 'failed') {
+          // Generation failed
+          await this.bot.sendMessage(
+            chatId,
+            `
+❌ Генерация изображения не удалась
+
+ID: #${imageId}
+Возможные причины:
+• Некорректный промпт
+• Технические проблемы
+• Превышен лимит времени
+
+💰 Токен возвращен на ваш баланс.
+          `,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Попробовать снова', callback_data: 'image' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+          return;
+        } else if (attempts >= maxAttempts) {
+          // Timeout
+          await this.bot.sendMessage(
+            chatId,
+            `
+⏰ Превышено время ожидания
+
+ID: #${imageId}
+Генерация может все еще продолжаться.
+Проверьте результат позже или обратитесь в поддержку.
+          `,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+          return;
+        }
+
+        // Continue polling
+        setTimeout(poll, 30000); // Poll every 30 seconds
+      } catch (error) {
+        this.logger.error(`Error polling image status for ${imageId}:`, error);
+
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 30000);
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            `
+❌ Ошибка проверки статуса изображения
+
+ID: #${imageId}
 Обратитесь в поддержку для получения результата.
           `,
           );
