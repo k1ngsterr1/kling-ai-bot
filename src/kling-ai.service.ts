@@ -101,6 +101,15 @@ export class KlingAiService implements OnModuleInit {
       headers: {
         'Content-Type': 'application/json',
       },
+      // Add connection keep-alive settings
+      httpsAgent: new (require('https').Agent)({
+        keepAlive: true,
+        keepAliveMsecs: 10000,
+        timeout: 60000,
+        freeSocketTimeout: 30000,
+        maxSockets: 10,
+        maxFreeSockets: 5,
+      }),
     });
 
     // Add request interceptor to add JWT authentication
@@ -136,6 +145,35 @@ export class KlingAiService implements OnModuleInit {
         return Promise.reject(error);
       },
     );
+  }
+
+  private async retryRequest<T>(
+    requestFn: () => Promise<T>,
+    maxRetries: number = 3,
+    delay: number = 1000,
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await requestFn();
+      } catch (error) {
+        this.logger.warn(
+          `Attempt ${attempt}/${maxRetries} failed:`,
+          error.message,
+        );
+
+        if (attempt === maxRetries) {
+          throw error; // Re-throw on final attempt
+        }
+
+        // Exponential backoff delay
+        await new Promise((resolve) =>
+          setTimeout(resolve, delay * Math.pow(2, attempt - 1)),
+        );
+      }
+    }
+
+    // This should never be reached, but TypeScript requires it
+    throw new Error('Retry logic failed unexpectedly');
   }
 
   private generateJwtToken(): string {
@@ -465,45 +503,84 @@ export class KlingAiService implements OnModuleInit {
     this.logger.log(`Checking status for image: ${imageId}`);
 
     try {
-      const endpoint = `https://api.klingai.com/v1/images/generations/${imageId}`;
-      const response = await this.httpClient.get(endpoint);
+      const result = await this.retryRequest(
+        async () => {
+          const endpoint = `https://api.klingai.com/v1/images/generations/${imageId}`;
 
-      this.logger.log(
-        `Image status response: ${JSON.stringify(response.data)}`,
-      );
+          // Add specific timeout for status check
+          const response = await this.httpClient.get(endpoint, {
+            timeout: 30000, // 30 seconds timeout for status check
+          });
 
-      // Find the specific task in the response array
-      const tasks = response.data.data || [];
-      this.logger.debug(`Found ${tasks.length} tasks in response`);
+          this.logger.log(
+            `Image status response: ${JSON.stringify(response.data)}`,
+          );
 
-      const task = tasks.find((t) => t.task_id === imageId);
+          // Find the specific task in the response array
+          const tasks = response.data.data || [];
+          this.logger.debug(`Found ${tasks.length} tasks in response`);
 
-      if (!task) {
-        this.logger.warn(`Task ${imageId} not found in response`);
-        return {
-          id: imageId,
-          status: 'failed',
-        };
-      }
+          const task = tasks.find((t) => t.task_id === imageId);
 
-      const result: KlingImageResponse = {
-        id: imageId,
-        status: this.mapKlingStatus(task.task_status),
-        imageUrl:
-          task.task_status === 'succeed' && task.task_result?.images?.length > 0
-            ? task.task_result.images[0].url
-            : undefined,
-      };
+          if (!task) {
+            this.logger.warn(`Task ${imageId} not found in response`);
+            return {
+              id: imageId,
+              status: 'failed' as const,
+            };
+          }
 
-      this.logger.log(
-        `Image ${imageId} status: ${result.status} (raw: ${task.task_status})`,
-      );
+          const result: KlingImageResponse = {
+            id: imageId,
+            status: this.mapKlingStatus(task.task_status),
+            imageUrl:
+              task.task_status === 'succeed' &&
+              task.task_result?.images?.length > 0
+                ? task.task_result.images[0].url
+                : undefined,
+          };
+
+          this.logger.log(
+            `Image ${imageId} status: ${result.status} (raw: ${task.task_status})`,
+          );
+
+          return result;
+        },
+        2,
+        2000,
+      ); // 2 retries with 2 second base delay
+
       return result;
     } catch (error) {
-      this.logger.error('Error checking image status:', error);
+      this.logger.error('Error checking image status:', {
+        imageId,
+        error: error.message,
+        code: error.code,
+        timeout: error.code === 'ECONNABORTED' ? 'Request timeout' : false,
+      });
 
       if (axios.isAxiosError(error)) {
-        this.logger.error('API Error Response:', error.response?.data);
+        this.logger.error('API Error Response:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          headers: error.response?.headers,
+        });
+
+        // If it's a timeout or connection error, return processing to continue polling
+        if (
+          error.code === 'ECONNABORTED' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ECONNRESET'
+        ) {
+          this.logger.warn(
+            `Connection/timeout error for ${imageId}, continuing polling...`,
+          );
+          return {
+            id: imageId,
+            status: 'processing',
+          };
+        }
       }
 
       // For development, simulate completion after some time
