@@ -38,6 +38,10 @@ export class KlingAiService implements OnModuleInit {
   private accessKey: string;
   private secretKey: string;
 
+  // JWT token caching
+  private cachedJwtToken: string | null = null;
+  private jwtTokenExpiry: number = 0;
+
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
@@ -49,6 +53,17 @@ export class KlingAiService implements OnModuleInit {
   async onModuleInit() {
     await this.loadKlingConfig();
     this.initializeHttpClient();
+
+    // Test API keys on startup
+    if (this.accessKey && this.secretKey) {
+      const testResult = await this.testApiKeys();
+      if (!testResult.valid) {
+        this.logger.error('🚫 Kling API keys test failed:', testResult.error);
+        this.logger.error(
+          'Please check and update your API keys via /admin panel',
+        );
+      }
+    }
   }
 
   private async loadKlingConfig() {
@@ -95,53 +110,69 @@ export class KlingAiService implements OnModuleInit {
   }
 
   private initializeHttpClient() {
+    this.logger.log('Initializing HTTP client...');
+
+    // Clear JWT cache on initialization
+    this.cachedJwtToken = null;
+    this.jwtTokenExpiry = 0;
+
     this.httpClient = axios.create({
       baseURL: 'https://api.klingai.com',
-      timeout: 60000,
+      timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
+        'User-Agent': 'KlingAI-Bot/1.0',
       },
-      // Add connection keep-alive settings
-      httpsAgent: new (require('https').Agent)({
-        keepAlive: true,
-        keepAliveMsecs: 10000,
-        timeout: 60000,
-        freeSocketTimeout: 30000,
-        maxSockets: 10,
-        maxFreeSockets: 5,
-      }),
     });
 
-    // Add request interceptor to add JWT authentication
+    // Request interceptor for JWT token
     this.httpClient.interceptors.request.use(
-      (config) => {
-        const token = this.generateJwtToken();
-        config.headers['Authorization'] = `Bearer ${token}`;
-
-        this.logger.debug(
-          `Kling AI Request: ${config.method?.toUpperCase()} ${config.url}`,
-        );
+      async (config) => {
+        const token = await this.generateJwtToken();
+        config.headers.Authorization = `Bearer ${token}`;
         return config;
       },
       (error) => {
-        this.logger.error('Kling AI Request error:', error.message);
+        this.logger.error('Request interceptor error:', error);
         return Promise.reject(error);
       },
     );
 
-    // Add response interceptor for error handling
+    // Response interceptor for error handling
     this.httpClient.interceptors.response.use(
-      (response) => {
-        this.logger.debug(`Kling AI Response: ${response.status}`);
-        return response;
-      },
-      (error) => {
-        this.logger.error('Kling AI API Error:', {
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          data: error.response?.data,
-          message: error.message,
-        });
+      (response) => response,
+      async (error) => {
+        const originalRequest = error.config;
+
+        // Retry on specific errors
+        if (
+          error.response?.status === 401 ||
+          error.response?.status === 429 ||
+          error.response?.status >= 500
+        ) {
+          if (!originalRequest._retryCount) {
+            originalRequest._retryCount = 0;
+          }
+
+          if (originalRequest._retryCount < 3) {
+            originalRequest._retryCount++;
+
+            // Clear JWT cache on 401 error
+            if (error.response?.status === 401) {
+              this.logger.warn('Clearing JWT cache due to 401 error');
+              this.cachedJwtToken = null;
+              this.jwtTokenExpiry = 0;
+            }
+
+            const delay = Math.pow(2, originalRequest._retryCount) * 1000;
+            this.logger.warn(
+              `Retrying request (${originalRequest._retryCount}/3) after ${delay}ms`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            return this.httpClient.request(originalRequest);
+          }
+        }
+
         return Promise.reject(error);
       },
     );
@@ -177,34 +208,102 @@ export class KlingAiService implements OnModuleInit {
   }
 
   private generateJwtToken(): string {
-    const headers = {
+    const now = Math.floor(Date.now() / 1000);
+
+    // Check if we have a valid cached token (with 5 minute buffer before expiry)
+    if (this.cachedJwtToken && this.jwtTokenExpiry > now + 300) {
+      this.logger.debug('Using cached JWT token');
+      return this.cachedJwtToken;
+    }
+
+    // Create header
+    const header = {
       alg: 'HS256',
       typ: 'JWT',
     };
 
-    const now = Math.floor(Date.now() / 1000);
+    // Create payload according to Kling AI docs
+    const expiry = now + 1800; // Expire in 30 minutes
     const payload = {
       iss: this.accessKey,
-      exp: now + 1800, // Current time + 30 minutes
-      nbf: now - 5, // Current time - 5 seconds
+      exp: expiry,
+      nbf: now, // Not before now
     };
 
+    this.logger.debug('Generating new JWT token');
+    this.logger.debug('JWT Header:', header);
     this.logger.debug('JWT Payload:', {
-      iss: this.accessKey,
+      iss: this.accessKey?.substring(0, 8) + '...',
       exp: payload.exp,
       nbf: payload.nbf,
       currentTime: now,
       validFor: '30 minutes',
     });
 
-    const token = jwt.sign(payload, this.secretKey, { algorithm: 'HS256' });
+    // Create JWT token
+    const token = jwt.sign(payload, this.secretKey, {
+      algorithm: 'HS256',
+      header: header,
+    });
+
+    // Cache the token
+    this.cachedJwtToken = token;
+    this.jwtTokenExpiry = expiry;
 
     this.logger.debug(
       'Generated JWT token (first 20 chars):',
       token.substring(0, 20) + '...',
     );
 
+    // Log token parts for debugging
+    const [headerB64, payloadB64, signature] = token.split('.');
+    this.logger.debug('JWT Parts:', {
+      header: headerB64,
+      payload: payloadB64,
+      signature: signature?.substring(0, 10) + '...',
+    });
+
     return token;
+  }
+
+  // Test API keys validity
+  async testApiKeys(): Promise<{ valid: boolean; error?: string }> {
+    if (!this.accessKey || !this.secretKey) {
+      return { valid: false, error: 'API keys not configured' };
+    }
+
+    try {
+      // Simple test request to check if JWT auth works
+      const response = await this.httpClient.get(
+        '/v1/images/generations?page=1&size=1',
+      );
+
+      if (response.status === 200) {
+        this.logger.log('✅ API keys are valid - test request successful');
+        return { valid: true };
+      } else {
+        this.logger.warn(`⚠️ Unexpected response status: ${response.status}`);
+        return { valid: false, error: `Unexpected status: ${response.status}` };
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const message = error.response?.data?.message || error.message;
+
+        if (status === 401) {
+          this.logger.error('❌ API keys are INVALID - Authentication failed');
+          return { valid: false, error: `Authentication failed: ${message}` };
+        } else {
+          this.logger.warn(
+            `⚠️ API test failed with status ${status}: ${message}`,
+          );
+          return { valid: false, error: `API error ${status}: ${message}` };
+        }
+      }
+
+      this.logger.error('❌ API test failed:', error.message);
+      return { valid: false, error: error.message };
+    }
   }
 
   async generateVideo(request: KlingVideoRequest): Promise<KlingVideoResponse> {
@@ -623,6 +722,9 @@ export class KlingAiService implements OnModuleInit {
       `Updating access key: ${newAccessKey.substring(0, 6)}***${newAccessKey.substring(newAccessKey.length - 4)}`,
     );
     this.accessKey = newAccessKey;
+    // Clear JWT cache when keys change
+    this.cachedJwtToken = null;
+    this.jwtTokenExpiry = 0;
     await this.saveKlingConfig(); // Save to database
     this.initializeHttpClient(); // Reinitialize with new keys
   }
@@ -632,6 +734,9 @@ export class KlingAiService implements OnModuleInit {
       `Updating secret key: ${newSecretKey.substring(0, 6)}***${newSecretKey.substring(newSecretKey.length - 4)}`,
     );
     this.secretKey = newSecretKey;
+    // Clear JWT cache when keys change
+    this.cachedJwtToken = null;
+    this.jwtTokenExpiry = 0;
     await this.saveKlingConfig(); // Save to database
     this.initializeHttpClient(); // Reinitialize with new keys
   }
