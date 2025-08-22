@@ -529,19 +529,39 @@ export class TelegramBotService {
         this.handleClearExpiredTokens(chatId, callbackQuery.from?.id);
         break;
       case 'admin_back':
-        this.handleAdminCommand(chatId, callbackQuery.from?.id);
+        this.handleAdminCommand(
+          chatId,
+          callbackQuery.from?.id,
+          callbackQuery.message?.message_id,
+        );
         break;
       case 'admin_api_keys':
-        this.handleAdminApiKeys(chatId, callbackQuery.from?.id);
+        this.handleAdminApiKeys(
+          chatId,
+          callbackQuery.from?.id,
+          callbackQuery.message?.message_id,
+        );
         break;
       case 'admin_change_access_key':
-        this.handleChangeAccessKey(chatId, callbackQuery.from?.id);
+        this.handleChangeAccessKey(
+          chatId,
+          callbackQuery.from?.id,
+          callbackQuery.message?.message_id,
+        );
         break;
       case 'admin_change_secret_key':
-        this.handleChangeSecretKey(chatId, callbackQuery.from?.id);
+        this.handleChangeSecretKey(
+          chatId,
+          callbackQuery.from?.id,
+          callbackQuery.message?.message_id,
+        );
         break;
       case 'admin_view_current_keys':
-        this.handleViewCurrentKeys(chatId, callbackQuery.from?.id);
+        this.handleViewCurrentKeys(
+          chatId,
+          callbackQuery.from?.id,
+          callbackQuery.message?.message_id,
+        );
         break;
       case 'image_ratio_1:1':
         this.handleImageAspectRatioChoice(chatId, '1:1');
@@ -2620,7 +2640,11 @@ c) Если указана подписка на канал, то генерац
 
   // Admin token management methods
 
-  private handleAdminCommand(chatId: number, userId?: number) {
+  private handleAdminCommand(
+    chatId: number,
+    userId?: number,
+    messageId?: number,
+  ) {
     if (!this.isAdmin(userId)) {
       this.bot.sendMessage(
         chatId,
@@ -2640,12 +2664,12 @@ c) Если указана подписка на канал, то генерац
 • Удаление токенов
 • Очистка истекших токенов
 
-� Управление Kling AI API:
+🔑 Управление Kling AI API:
 • Просмотр текущих ключей
 • Изменение Access Key
 • Изменение Secret Key
 
-�📊 Статистика системы в разработке
+📊 Статистика системы в разработке
     `;
 
     const keyboard = {
@@ -2661,7 +2685,17 @@ c) Если указана подписка на канал, то генерац
       ],
     };
 
-    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    if (messageId) {
+      // Update existing message
+      this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: keyboard,
+      });
+    } else {
+      // Send new message
+      this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    }
   }
 
   private handleAdminTokens(chatId: number, userId?: number) {
@@ -3013,7 +3047,11 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
 
   // API Keys management methods
 
-  private handleAdminApiKeys(chatId: number, userId?: number) {
+  private handleAdminApiKeys(
+    chatId: number,
+    userId?: number,
+    messageId?: number,
+  ) {
     if (!this.isAdmin(userId)) {
       this.bot.sendMessage(
         chatId,
@@ -3058,10 +3096,24 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       ],
     };
 
-    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    if (messageId) {
+      // Update existing message
+      this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: keyboard,
+      });
+    } else {
+      // Send new message
+      this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    }
   }
 
-  private handleViewCurrentKeys(chatId: number, userId?: number) {
+  private handleViewCurrentKeys(
+    chatId: number,
+    userId?: number,
+    messageId?: number,
+  ) {
     if (!this.isAdmin(userId)) {
       this.bot.sendMessage(
         chatId,
@@ -3114,13 +3166,28 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       ],
     };
 
-    this.bot.sendMessage(chatId, text, {
-      reply_markup: keyboard,
-      parse_mode: 'Markdown',
-    });
+    if (messageId) {
+      // Update existing message
+      this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: keyboard,
+        parse_mode: 'Markdown',
+      });
+    } else {
+      // Send new message
+      this.bot.sendMessage(chatId, text, {
+        reply_markup: keyboard,
+        parse_mode: 'Markdown',
+      });
+    }
   }
 
-  private handleChangeAccessKey(chatId: number, userId?: number) {
+  private handleChangeAccessKey(
+    chatId: number,
+    userId?: number,
+    messageId?: number,
+  ) {
     if (!this.isAdmin(userId)) {
       this.bot.sendMessage(
         chatId,
@@ -3142,11 +3209,25 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
 Отправьте новый Access Key:
     `;
 
-    this.bot.sendMessage(chatId, text);
+    if (messageId) {
+      // Update existing message
+      this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+      });
+    } else {
+      // Send new message
+      this.bot.sendMessage(chatId, text);
+    }
+
     this.userStates.set(chatId, { state: 'awaiting_access_key' });
   }
 
-  private handleChangeSecretKey(chatId: number, userId?: number) {
+  private handleChangeSecretKey(
+    chatId: number,
+    userId?: number,
+    messageId?: number,
+  ) {
     if (!this.isAdmin(userId)) {
       this.bot.sendMessage(
         chatId,
@@ -3168,7 +3249,17 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
 Отправьте новый Secret Key:
     `;
 
-    this.bot.sendMessage(chatId, text);
+    if (messageId) {
+      // Update existing message
+      this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+      });
+    } else {
+      // Send new message
+      this.bot.sendMessage(chatId, text);
+    }
+
     this.userStates.set(chatId, { state: 'awaiting_secret_key' });
   }
 
