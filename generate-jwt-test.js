@@ -45,6 +45,7 @@ console.log('');
 const token = jwt.sign(payload, secretKey, {
   algorithm: 'HS256',
   header: header,
+  noTimestamp: true, // Убираем автоматическое поле iat
 });
 
 console.log('🎫 Сгенерированный JWT токен:');
