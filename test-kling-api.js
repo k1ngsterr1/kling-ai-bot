@@ -18,7 +18,10 @@ function generateJwtToken(accessKey, secretKey) {
     typ: 'JWT',
   };
 
-  return jwt.sign(payload, secretKey, { header: headers });
+  return jwt.sign(payload, secretKey, {
+    header: headers,
+    noTimestamp: true, // Убираем автоматическое поле iat
+  });
 }
 
 // Test function

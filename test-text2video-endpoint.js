@@ -10,7 +10,6 @@ function generateJwtToken(accessKey, secretKey) {
     iss: accessKey,
     exp: Math.floor(Date.now() / 1000) + 1800, // 30 minutes
     nbf: Math.floor(Date.now() / 1000) - 5, // 5 seconds ago
-    iat: Math.floor(Date.now() / 1000),
   };
 
   const token = jwt.sign(payload, secretKey, {
@@ -19,6 +18,7 @@ function generateJwtToken(accessKey, secretKey) {
       alg: 'HS256',
       typ: 'JWT',
     },
+    noTimestamp: true, // Убираем автоматическое поле iat
   });
 
   return token;

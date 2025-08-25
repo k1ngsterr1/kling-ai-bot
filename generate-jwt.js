@@ -15,7 +15,10 @@ function encodeJwtToken(ak, sk) {
     nbf: Math.floor(Date.now() / 1000) - 5, // Current time - 5 seconds
   };
 
-  const token = jwt.sign(payload, sk, { header: headers });
+  const token = jwt.sign(payload, sk, {
+    header: headers,
+    noTimestamp: true, // Убираем автоматическое поле iat
+  });
   return token;
 }
 
