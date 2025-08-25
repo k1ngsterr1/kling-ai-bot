@@ -262,6 +262,9 @@ export class TelegramBotService {
 
   private async handleBalanceCommand(chatId: number) {
     try {
+      // Убеждаемся, что пользователь существует в базе данных
+      await this.ensureUserExists(chatId);
+      
       // Получаем данные пользователя из базы данных
       const user = await this.prisma.user.findFirst({
         where: { telegramId: chatId.toString() },
@@ -3626,6 +3629,44 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
     }
   }
 
+  // Ensure user exists in database
+  private async ensureUserExists(chatId: number): Promise<void> {
+    try {
+      const existingUser = await this.prisma.user.findUnique({
+        where: { telegramId: chatId.toString() }
+      });
+
+      if (!existingUser) {
+        this.logger.log(`Creating user record for chatId: ${chatId}`);
+        
+        // Create a basic user record
+        await this.prisma.user.create({
+          data: {
+            telegramId: chatId.toString(),
+            username: null,
+            firstName: null,
+            lastName: null,
+            languageCode: null,
+            isBot: false,
+            isPremium: false,
+            userType: 'NEW_ID',
+            videoTokens: 0,
+            imageTokens: 0,
+            lastActiveAt: new Date(),
+          },
+        });
+
+        this.logger.log(`Created user record for chatId: ${chatId}`);
+        
+        // Add to in-memory group tracking for compatibility
+        this.addUserToGroup(chatId, 'new_id');
+      }
+    } catch (error) {
+      this.logger.error(`Error ensuring user exists for chatId ${chatId}:`, error);
+      throw error;
+    }
+  }
+
   // Payment-related methods
   private async handleBuyPackage(
     chatId: number,
@@ -3636,6 +3677,9 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       this.logger.log(
         `User ${chatId} wants to buy package: ${packageName} for ${amount} RUB`,
       );
+
+      // Убеждаемся, что пользователь существует в базе данных
+      await this.ensureUserExists(chatId);
 
       // Определяем количество токенов для каждого пакета
       const packageDetails = this.getPackageDetails(amount);
