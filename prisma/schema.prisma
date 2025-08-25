@@ -27,6 +27,10 @@ model User {
   isSubscribed Boolean  @default(false)
   subscriptionExpiry DateTime?
   
+  // Token balances
+  videoTokens Int @default(0)
+  imageTokens Int @default(0)
+  
   // Activity tracking
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -36,6 +40,9 @@ model User {
   videosGenerated Int @default(0)
   imagesGenerated Int @default(0)
   tokensUsed     Int @default(0)
+  
+  // Relations
+  payments Payment[]
   
   @@map("users")
 }
@@ -79,4 +86,31 @@ model KlingConfig {
   updatedAt DateTime @updatedAt
   
   @@map("kling_config")
+}
+
+model Payment {
+  id          Int      @id @default(autoincrement())
+  invoiceId   String   @unique // Robokassa invoice ID
+  userId      String   // Telegram user ID
+  amount      Decimal  @db.Decimal(10,2)
+  currency    String   @default("RUB")
+  packageType String   // video_tokens, image_tokens, premium_subscription
+  description String
+  status      String   @default("pending") // pending, completed, failed, cancelled
+  
+  // Robokassa specific fields
+  robokassaData Json?   // Store additional Robokassa callback data
+  
+  // Token allocations
+  videoTokensGranted Int @default(0)
+  imageTokensGranted Int @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  completedAt DateTime?
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [telegramId])
+  
+  @@map("payments")
 }

@@ -7,6 +7,7 @@ import {
   KlingImageRequest,
 } from './kling-ai.service';
 import { PrismaService } from './prisma.service';
+import { RobokassaService } from './robokassa.service';
 
 @Injectable()
 export class TelegramBotService {
@@ -57,6 +58,7 @@ export class TelegramBotService {
     private configService: ConfigService,
     private klingAiService: KlingAiService,
     private prisma: PrismaService,
+    private robokassaService: RobokassaService,
   ) {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     if (!token) {
@@ -258,52 +260,80 @@ export class TelegramBotService {
     this.bot.sendMessage(chatId, imageText, { reply_markup: keyboard });
   }
 
-  private handleBalanceCommand(chatId: number) {
-    const balanceText = `
+  private async handleBalanceCommand(chatId: number) {
+    try {
+      // Получаем данные пользователя из базы данных
+      const user = await this.prisma.user.findFirst({
+        where: { telegramId: chatId.toString() },
+      });
+
+      const videoTokens = user?.videoTokens || 0;
+      const imageTokens = user?.imageTokens || 0;
+      const isSubscribed = user?.isSubscribed || false;
+      const subscriptionExpiry = user?.subscriptionExpiry;
+
+      let subscriptionStatus = '⚠️ Подписка не активна';
+      if (
+        isSubscribed &&
+        subscriptionExpiry &&
+        subscriptionExpiry > new Date()
+      ) {
+        const expiryDate = subscriptionExpiry.toLocaleDateString('ru-RU');
+        subscriptionStatus = `✅ Подписка активна до ${expiryDate}`;
+      }
+
+      const balanceText = `
 � ВАШ ТЕКУЩИЙ БАЛАНС
 
-🎬 Видео-токены: 0
-📸 img-токены: 0
+🎬 Видео-токены: ${videoTokens}
+📸 Токены изображений: ${imageTokens}
 
-⚠️ Подписка не активна /Подписка активна до XX.XX.XXXX
+${subscriptionStatus}
 
-🔥 ВЫГОДНЫЕ ПОДПИСКИ (ежемесячное автопополнение)
+🔥 ВЫГОДНЫЕ ПАКЕТЫ ТОКЕНОВ
 
-[💎 СТАРТ] 25 видео + 100 изо • 1200 ₽/мес
-▸ Базовый пакет • идеален для тестирования
-▸ Автопродление • отмена в любой момент
+💎 СТАРТ • 100₽
+▸ 5 видео-токенов + 15 токенов изображений
+▸ Идеально для начинающих
 
-[💎 ПРОДВИНУТЫЙ] 50 видео + 100 изо • 2230 ₽/мес
-▸ ~~2400₽~~ • экономия 170₽ (7%)
-▸ Самый популярный вариант
+💎 БАЗОВЫЙ • 500₽  
+▸ 20 видео-токенов + 50 токенов изображений
+▸ Популярный выбор
 
-[💎 ПРОФИ] 100 видео + 200 изо • 4320 ₽/мес
-▸ ~~4800₽~~ • экономия 480₽ (10%)
-▸ Приоритетная очередь
+💎 ПРОДВИНУТЫЙ • 1000₽
+▸ 50 видео-токенов + 100 токенов изображений  
+▸ Лучшая цена за токен
 
-[💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ]
-Покупай генерации, без подписок и ограничений.
-    `;
+💎 ПРОФИ • 2000₽
+▸ 100 видео-токенов + 200 токенов изображений
+▸ Максимальная выгода
+      `;
 
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: '💎 СТАРТ', callback_data: 'subscription_start' }],
-        [{ text: '💎 ПРОДВИНУТЫЙ', callback_data: 'subscription_advanced' }],
-        [{ text: '💎 ПРОФИ', callback_data: 'subscription_pro' }],
-        [
-          {
-            text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
-            callback_data: 'additional_packages',
-          },
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: '💎 СТАРТ (100₽)', callback_data: 'buy_package_100' }],
+          [{ text: '💎 БАЗОВЫЙ (500₽)', callback_data: 'buy_package_500' }],
+          [
+            {
+              text: '💎 ПРОДВИНУТЫЙ (1000₽)',
+              callback_data: 'buy_package_1000',
+            },
+          ],
+          [{ text: '💎 ПРОФИ (2000₽)', callback_data: 'buy_package_2000' }],
+          [{ text: '🔙 Назад', callback_data: 'main' }],
         ],
-        [
-          { text: 'Отменить подписку', callback_data: 'cancel_subscription' },
-          { text: 'Назад', callback_data: 'main' },
-        ],
-      ],
-    };
+      };
 
-    this.bot.sendMessage(chatId, balanceText, { reply_markup: keyboard });
+      await this.bot.sendMessage(chatId, balanceText, {
+        reply_markup: keyboard,
+      });
+    } catch (error) {
+      this.logger.error('Error in handleBalanceCommand:', error);
+      await this.bot.sendMessage(
+        chatId,
+        'Произошла ошибка при получении баланса. Попробуйте позже.',
+      );
+    }
   }
 
   private handleHelpCommand(chatId: number) {
@@ -571,6 +601,18 @@ export class TelegramBotService {
         break;
       case 'image_ratio_16:9':
         this.handleImageAspectRatioChoice(chatId, '16:9');
+        break;
+      case 'buy_package_100':
+        this.handleBuyPackage(chatId, 100, 'Пакет СТАРТ');
+        break;
+      case 'buy_package_500':
+        this.handleBuyPackage(chatId, 500, 'Пакет БАЗОВЫЙ');
+        break;
+      case 'buy_package_1000':
+        this.handleBuyPackage(chatId, 1000, 'Пакет ПРОДВИНУТЫЙ');
+        break;
+      case 'buy_package_2000':
+        this.handleBuyPackage(chatId, 2000, 'Пакет ПРОФИ');
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
@@ -1879,16 +1921,6 @@ ${
         chatId,
         'Для добавления изображений сначала выберите "🎬 Видео" и введите описание.',
       );
-    }
-  }
-
-  // Public method to send custom messages
-  async sendMessage(chatId: number, text: string, options?: any) {
-    try {
-      return await this.bot.sendMessage(chatId, text, options);
-    } catch (error) {
-      this.logger.error('Error sending message:', error);
-      throw error;
     }
   }
 
@@ -3591,6 +3623,100 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       }
     } catch (error) {
       this.logger.error('Error registering user:', error);
+    }
+  }
+
+  // Payment-related methods
+  private async handleBuyPackage(
+    chatId: number,
+    amount: number,
+    packageName: string,
+  ) {
+    try {
+      this.logger.log(
+        `User ${chatId} wants to buy package: ${packageName} for ${amount} RUB`,
+      );
+
+      // Определяем количество токенов для каждого пакета
+      const packageDetails = this.getPackageDetails(amount);
+
+      // Создаем описание для платежа
+      const description = `${packageName} - ${packageDetails.videoTokens} видео-токенов + ${packageDetails.imageTokens} токенов изображений`;
+
+      // Создаем URL для оплаты через Robokassa
+      const paymentData = await this.robokassaService.createPaymentUrl({
+        userId: chatId,
+        amount: amount,
+        description: description,
+      });
+
+      // Сохраняем информацию о платеже в базе данных
+      await this.prisma.payment.create({
+        data: {
+          invoiceId: paymentData.invoiceId.toString(),
+          userId: chatId.toString(),
+          amount: amount,
+          packageType: 'tokens',
+          description: description,
+          status: 'pending',
+          videoTokensGranted: packageDetails.videoTokens,
+          imageTokensGranted: packageDetails.imageTokens,
+        },
+      });
+
+      const message = `
+💳 ОПЛАТА ПАКЕТА
+
+📦 ${packageName}
+💰 Сумма: ${amount} ₽
+🎬 Видео-токены: ${packageDetails.videoTokens}
+📸 Токены изображений: ${packageDetails.imageTokens}
+
+Нажмите кнопку ниже для перехода к оплате:
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: `💳 Оплатить ${amount} ₽`, url: paymentData.paymentUrl }],
+          [{ text: '🔙 Назад к пакетам', callback_data: 'balance' }],
+        ],
+      };
+
+      await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+    } catch (error) {
+      this.logger.error('Error creating payment:', error);
+      await this.bot.sendMessage(
+        chatId,
+        'Произошла ошибка при создании платежа. Попробуйте позже.',
+      );
+    }
+  }
+
+  private getPackageDetails(amount: number): {
+    videoTokens: number;
+    imageTokens: number;
+  } {
+    switch (amount) {
+      case 100:
+        return { videoTokens: 1, imageTokens: 3 };
+      case 500:
+        return { videoTokens: 20, imageTokens: 50 };
+      case 1000:
+        return { videoTokens: 50, imageTokens: 100 };
+      case 2000:
+        return { videoTokens: 100, imageTokens: 200 };
+      default:
+        return { videoTokens: 1, imageTokens: 3 };
+    }
+  }
+
+  // Public method to send messages from payment controller (updated to be public)
+  public async sendMessage(chatId: number, text: string, options?: any) {
+    try {
+      return await this.bot.sendMessage(chatId, text, options);
+    } catch (error) {
+      this.logger.error('Error sending message:', error);
+      throw error;
     }
   }
 }
