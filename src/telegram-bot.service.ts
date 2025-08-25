@@ -932,7 +932,8 @@ ${subscriptionStatus}
 Примерное время: 1-2 мин
 ID: ${generationResult.id}
 
-🔔 Мы пришлем результат сразу как он будет готов
+🔔 Результат придет автоматически
+⚠️ При ошибках уведомим в течение 10-20 секунд
         `;
 
         const keyboard = {
@@ -1027,7 +1028,8 @@ ID: #${generationResult.id}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
 Текущий статус: [██████▒▒▒▒▒▒▒▒▒ 20%]
 
-🔔 Мы пришлем результат сразу как он будет готов
+🔔 Результат придет автоматически
+⚠️ При ошибках уведомим в течение 10-20 секунд
       `;
 
       const keyboard = {
@@ -1181,7 +1183,7 @@ ID: #${videoId}
 
           return;
         } else if (status.status === 'failed') {
-          // Generation failed
+          // Generation failed - НЕМЕДЛЕННО уведомляем пользователя!
           let failureReason = 'Неизвестная причина';
 
           if (status.errorMessage) {
@@ -1195,6 +1197,7 @@ ID: #${videoId}
             }
           }
 
+          // Сразу отправляем уведомление об ошибке
           await this.bot.sendMessage(
             chatId,
             `❌ Генерация видео не удалась
@@ -1240,13 +1243,15 @@ ID: #${videoId}
           return;
         }
 
-        // Continue polling
-        setTimeout(poll, 30000); // Poll every 30 seconds
+        // Continue polling - быстрее проверяем для ранних ошибок
+        const checkInterval = attempts <= 3 ? 10000 : 30000; // Первые 3 раза каждые 10 сек
+        setTimeout(poll, checkInterval);
       } catch (error) {
         this.logger.error(`Error polling video status for ${videoId}:`, error);
 
         if (attempts < maxAttempts) {
-          setTimeout(poll, 30000);
+          const checkInterval = attempts <= 3 ? 10000 : 30000; // Быстро проверяем на ошибки
+          setTimeout(poll, checkInterval);
         } else {
           await this.bot.sendMessage(
             chatId,
@@ -1261,8 +1266,8 @@ ID: #${videoId}
       }
     };
 
-    // Start polling after initial delay
-    setTimeout(poll, 30000);
+    // Start polling after initial delay - быстрее начинаем
+    setTimeout(poll, 10000);
   }
 
   private async pollImageGeneration(
@@ -1365,7 +1370,7 @@ ID: #${videoId}
           }
           return;
         } else if (status.status === 'failed') {
-          // Generation failed
+          // Generation failed - НЕМЕДЛЕННО уведомляем пользователя!
           let failureReason = 'Неизвестная причина';
 
           if (status.errorMessage) {
@@ -1379,6 +1384,7 @@ ID: #${videoId}
             }
           }
 
+          // Сразу отправляем уведомление об ошибке
           await this.bot.sendMessage(
             chatId,
             `❌ Генерация изображения не удалась
@@ -1420,13 +1426,15 @@ ID: #${videoId}
           return;
         }
 
-        // Continue polling
-        setTimeout(poll, 30000); // Poll every 30 seconds
+        // Continue polling - быстрее проверяем для ранних ошибок
+        const checkInterval = attempts <= 3 ? 10000 : 30000; // Первые 3 раза каждые 10 сек
+        setTimeout(poll, checkInterval);
       } catch (error) {
         this.logger.error(`Error polling image status for ${imageId}:`, error);
 
         if (attempts < maxAttempts) {
-          setTimeout(poll, 30000);
+          const checkInterval = attempts <= 3 ? 10000 : 30000; // Быстро проверяем на ошибки
+          setTimeout(poll, checkInterval);
         } else {
           await this.bot.sendMessage(
             chatId,
@@ -1438,8 +1446,8 @@ ID: #${videoId}
       }
     };
 
-    // Start polling after initial delay
-    setTimeout(poll, 30000);
+    // Start polling after initial delay - быстрее начинаем
+    setTimeout(poll, 10000);
   }
 
   private async pollImageGenerationWithoutStatus(
@@ -1576,13 +1584,15 @@ ID: #${videoId}
           return;
         }
 
-        // Continue polling
-        setTimeout(poll, 30000); // Poll every 30 seconds
+        // Continue polling - быстрее проверяем для ранних ошибок
+        const checkInterval = attempts <= 3 ? 10000 : 30000; // Первые 3 раза каждые 10 сек
+        setTimeout(poll, checkInterval);
       } catch (error) {
         this.logger.error(`Error in image polling for ${imageId}:`, error);
 
         if (attempts < maxAttempts) {
-          setTimeout(poll, 30000);
+          const checkInterval = attempts <= 3 ? 10000 : 30000; // Быстро проверяем на ошибки
+          setTimeout(poll, checkInterval);
         } else {
           await this.bot.sendMessage(
             chatId,
@@ -1602,8 +1612,8 @@ ID: #${videoId}
       }
     };
 
-    // Start polling after initial delay
-    setTimeout(poll, 30000);
+    // Start polling after initial delay - быстрее начинаем
+    setTimeout(poll, 10000);
   }
 
   private handleTextMessage(msg: TelegramBot.Message) {
