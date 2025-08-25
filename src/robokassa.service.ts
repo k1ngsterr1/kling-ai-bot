@@ -34,6 +34,8 @@ export class RobokassaService {
   private readonly paymentUrl = 'https://auth.robokassa.ru/Merchant/Index.aspx';
   private readonly testMode = false; // Установите true для тестирования
 
+  //commit
+
   constructor() {
     this.logger.log('🏦 Robokassa service initialized');
     this.logger.log(`Merchant: ${this.merchantLogin}`);
