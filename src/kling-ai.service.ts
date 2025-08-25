@@ -244,7 +244,6 @@ export class KlingAiService implements OnModuleInit {
     const token = jwt.sign(payload, this.secretKey, {
       algorithm: 'HS256',
       header: header,
-      noTimestamp: true, // Убираем автоматическое поле iat
     });
 
     // Cache the token
