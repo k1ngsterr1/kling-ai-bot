@@ -232,6 +232,9 @@ export class PaymentController {
       const videoTokens = payment.videoTokensGranted;
       const imageTokens = payment.imageTokensGranted;
 
+      // Убеждаемся, что пользователь существует в базе данных
+      await this.ensureUserExists(userId);
+
       // Обновляем баланс пользователя
       await this.updateUserBalance(userId, videoTokens, imageTokens);
 
@@ -247,6 +250,40 @@ export class PaymentController {
       );
     } catch (error) {
       this.logger.error('Error processing successful payment:', error);
+      throw error;
+    }
+  }
+
+  private async ensureUserExists(userId: number): Promise<void> {
+    try {
+      const existingUser = await this.prismaService.user.findUnique({
+        where: { telegramId: userId.toString() }
+      });
+
+      if (!existingUser) {
+        this.logger.log(`Creating user record for userId: ${userId}`);
+        
+        // Create a basic user record
+        await this.prismaService.user.create({
+          data: {
+            telegramId: userId.toString(),
+            username: null,
+            firstName: null,
+            lastName: null,
+            languageCode: null,
+            isBot: false,
+            isPremium: false,
+            userType: 'NEW_ID',
+            videoTokens: 0,
+            imageTokens: 0,
+            lastActiveAt: new Date(),
+          },
+        });
+
+        this.logger.log(`Created user record for userId: ${userId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error ensuring user exists for userId ${userId}:`, error);
       throw error;
     }
   }
