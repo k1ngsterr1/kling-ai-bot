@@ -257,12 +257,12 @@ export class PaymentController {
   private async ensureUserExists(userId: number): Promise<void> {
     try {
       const existingUser = await this.prismaService.user.findUnique({
-        where: { telegramId: userId.toString() }
+        where: { telegramId: userId.toString() },
       });
 
       if (!existingUser) {
         this.logger.log(`Creating user record for userId: ${userId}`);
-        
+
         // Create a basic user record
         await this.prismaService.user.create({
           data: {
@@ -283,7 +283,10 @@ export class PaymentController {
         this.logger.log(`Created user record for userId: ${userId}`);
       }
     } catch (error) {
-      this.logger.error(`Error ensuring user exists for userId ${userId}:`, error);
+      this.logger.error(
+        `Error ensuring user exists for userId ${userId}:`,
+        error,
+      );
       throw error;
     }
   }
