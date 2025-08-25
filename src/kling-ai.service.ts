@@ -17,6 +17,7 @@ export interface KlingVideoResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   videoUrl?: string;
   estimatedTime?: number;
+  errorMessage?: string;
 }
 
 export interface KlingImageRequest {
@@ -29,6 +30,7 @@ export interface KlingImageResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   imageUrl?: string;
   estimatedTime?: number;
+  errorMessage?: string;
 }
 
 @Injectable()
@@ -447,6 +449,8 @@ export class KlingAiService implements OnModuleInit {
           task.task_status === 'succeed' && task.task_result?.videos?.length > 0
             ? task.task_result.videos[0].url
             : undefined,
+        errorMessage:
+          task.task_status === 'failed' ? task.task_status_msg : undefined,
       };
 
       this.logger.log(
@@ -642,6 +646,8 @@ export class KlingAiService implements OnModuleInit {
               task.task_result?.images?.length > 0
                 ? task.task_result.images[0].url
                 : undefined,
+            errorMessage:
+              task.task_status === 'failed' ? task.task_status_msg : undefined,
           };
 
           this.logger.log(

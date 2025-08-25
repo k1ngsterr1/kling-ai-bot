@@ -1182,19 +1182,32 @@ ID: #${videoId}
           return;
         } else if (status.status === 'failed') {
           // Generation failed
+          let failureReason = 'Неизвестная причина';
+
+          if (status.errorMessage) {
+            if (status.errorMessage.includes('risk control system')) {
+              failureReason =
+                'Блокировка системой контроля (неподходящий контент)';
+            } else if (status.errorMessage.includes('time out')) {
+              failureReason = 'Превышено время ожидания';
+            } else {
+              failureReason = status.errorMessage;
+            }
+          }
+
           await this.bot.sendMessage(
             chatId,
-            `
-❌ Генерация видео не удалась
+            `❌ Генерация видео не удалась
 
 ID: #${videoId}
-Возможные причины:
-• Некорректный промпт
-• Технические проблемы
-• Превышен лимит времени
+Причина: ${failureReason}
 
-💰 Токены возвращены на ваш баланс.
-          `,
+💡 Советы:
+• Используйте более нейтральные описания
+• Избегайте упоминаний людей, брендов, насилия
+• Попробуйте изменить формулировку
+
+💰 Токены возвращены на ваш баланс.`,
             {
               reply_markup: {
                 inline_keyboard: [
@@ -1353,14 +1366,29 @@ ID: #${videoId}
           return;
         } else if (status.status === 'failed') {
           // Generation failed
+          let failureReason = 'Неизвестная причина';
+
+          if (status.errorMessage) {
+            if (status.errorMessage.includes('risk control system')) {
+              failureReason =
+                'Блокировка системой контроля (неподходящий контент)';
+            } else if (status.errorMessage.includes('time out')) {
+              failureReason = 'Превышено время ожидания';
+            } else {
+              failureReason = status.errorMessage;
+            }
+          }
+
           await this.bot.sendMessage(
             chatId,
             `❌ Генерация изображения не удалась
 
-Возможные причины:
-• Некорректный промпт
-• Технические проблемы
-• Превышен лимит времени
+Причина: ${failureReason}
+
+💡 Советы:
+• Используйте более нейтральные описания
+• Избегайте упоминаний людей, брендов, насилия
+• Попробуйте изменить формулировку
 
 💰 Токен возвращен на ваш баланс.`,
             {
