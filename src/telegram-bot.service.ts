@@ -264,7 +264,7 @@ export class TelegramBotService {
     try {
       // Убеждаемся, что пользователь существует в базе данных
       await this.ensureUserExists(chatId);
-      
+
       // Получаем данные пользователя из базы данных
       const user = await this.prisma.user.findFirst({
         where: { telegramId: chatId.toString() },
@@ -3633,12 +3633,12 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
   private async ensureUserExists(chatId: number): Promise<void> {
     try {
       const existingUser = await this.prisma.user.findUnique({
-        where: { telegramId: chatId.toString() }
+        where: { telegramId: chatId.toString() },
       });
 
       if (!existingUser) {
         this.logger.log(`Creating user record for chatId: ${chatId}`);
-        
+
         // Create a basic user record
         await this.prisma.user.create({
           data: {
@@ -3657,12 +3657,15 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
         });
 
         this.logger.log(`Created user record for chatId: ${chatId}`);
-        
+
         // Add to in-memory group tracking for compatibility
         this.addUserToGroup(chatId, 'new_id');
       }
     } catch (error) {
-      this.logger.error(`Error ensuring user exists for chatId ${chatId}:`, error);
+      this.logger.error(
+        `Error ensuring user exists for chatId ${chatId}:`,
+        error,
+      );
       throw error;
     }
   }
