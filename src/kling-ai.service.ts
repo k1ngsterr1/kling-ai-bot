@@ -117,7 +117,7 @@ export class KlingAiService implements OnModuleInit {
     this.jwtTokenExpiry = 0;
 
     this.httpClient = axios.create({
-      baseURL: 'https://api.klingai.com',
+      baseURL: 'https://api-singapore.klingai.com',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
