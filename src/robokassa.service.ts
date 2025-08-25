@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto-js';
 
 export interface RobokassaPaymentRequest {
@@ -25,18 +26,28 @@ export interface RobokassaCallbackData {
 export class RobokassaService {
   private readonly logger = new Logger(RobokassaService.name);
 
-  // Robokassa credentials
-  private readonly merchantLogin = 'kling_tgbot';
-  private readonly password1 = 'ge2szRg0qJnrl81E0SEe'; // Для формирования подписи при инициализации
-  private readonly password2 = 'EJ8rKq4mtHbr65eP4LWV'; // Для получения уведомлений
+  // Robokassa credentials from environment
+  private readonly merchantLogin: string;
+  private readonly password1: string; // Для формирования подписи при инициализации
+  private readonly password2: string; // Для получения уведомлений
 
   // URLs
   private readonly paymentUrl = 'https://auth.robokassa.ru/Merchant/Index.aspx';
-  private readonly testMode = false; // Установите true для тестирования
+  private readonly testMode: boolean;
 
-  //commit
+  constructor(private configService: ConfigService) {
+    this.merchantLogin =
+      this.configService.get<string>('ROBOKASSA_MERCHANT_LOGIN') ||
+      'kling_tgbot';
+    this.password1 =
+      this.configService.get<string>('ROBOKASSA_PASSWORD1') ||
+      'ge2szRg0qJnrl81E0SEe';
+    this.password2 =
+      this.configService.get<string>('ROBOKASSA_PASSWORD2') ||
+      'EJ8rKq4mtHbr65eP4LWV';
+    this.testMode =
+      this.configService.get<string>('ROBOKASSA_TEST_MODE') === 'true';
 
-  constructor() {
     this.logger.log('🏦 Robokassa service initialized');
     this.logger.log(`Merchant: ${this.merchantLogin}`);
     this.logger.log(`Test mode: ${this.testMode ? 'ON' : 'OFF'}`);
@@ -59,6 +70,7 @@ export class RobokassaService {
     const signature = this.generatePaymentSignature(
       amount,
       invoiceId.toString(),
+      request.userId,
     );
 
     // Параметры для URL
@@ -133,9 +145,18 @@ export class RobokassaService {
   /**
    * Генерирует подпись для создания платежа
    */
-  private generatePaymentSignature(amount: string, invoiceId: string): string {
-    // Формат: MerchantLogin:OutSum:InvoiceID:Password1
-    const signatureString = `${this.merchantLogin}:${amount}:${invoiceId}:${this.password1}`;
+  private generatePaymentSignature(
+    amount: string,
+    invoiceId: string,
+    userId?: number,
+  ): string {
+    // Формат: MerchantLogin:OutSum:InvoiceID:Password1[:Shp_параметры в алфавитном порядке]
+    let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}:${this.password1}`;
+
+    // Добавляем Shp_ параметры в алфавитном порядке
+    if (userId) {
+      signatureString += `:Shp_UserId=${userId}`;
+    }
 
     this.logger.debug(
       `Payment signature string: ${signatureString.replace(this.password1, '***')}`,
