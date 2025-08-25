@@ -1,6 +1,8 @@
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
+// test
+
 // Настройки API
 const accessKey = 'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
 const secretKey = 'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
