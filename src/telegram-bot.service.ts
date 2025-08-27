@@ -427,6 +427,15 @@ ${subscriptionStatus}
     this.bot.answerCallbackQuery(callbackQuery.id);
 
     // Handle prefixed callback_data first (dynamic actions)
+    if (data && data.startsWith('pay_stars:')) {
+      const parts = data.split(':');
+      const invoiceId = parts[1];
+      const amount = parseInt(parts[2]);
+      const packageName = parts[3];
+      this.handlePayStars(chatId, invoiceId, amount, packageName);
+      return;
+    }
+
     if (data && data.startsWith('pay_with_stars:')) {
       const invoiceId = data.split(':')[1];
       this.handlePayWithStars(chatId, invoiceId);
@@ -665,6 +674,50 @@ ${subscriptionStatus}
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
+    }
+  }
+
+  // Handle Telegram Stars payment button
+  private async handlePayStars(
+    chatId: number,
+    invoiceId: string,
+    amount: number,
+    packageName: string,
+  ) {
+    try {
+      const payment = await this.prisma.payment.findFirst({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ Платёж не найден. Попробуйте еще раз.',
+        );
+        return;
+      }
+
+      const prices = [
+        { label: `${packageName}`, amount: amount }, // amount in stars
+      ];
+
+      // Send invoice for Telegram Stars payment
+      await (this.bot as any).sendInvoice(
+        chatId,
+        `${packageName}`,
+        payment.description || `Пакет ${packageName}`,
+        `pkg_${invoiceId}`,
+        '', // empty provider token for Telegram Stars
+        `start_${invoiceId}`,
+        'XTR', // Telegram Stars currency
+        prices,
+      );
+    } catch (error) {
+      this.logger.error('Error sending Telegram Stars invoice:', error);
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Не удалось создать инвойс для оплаты звёздами. Попробуйте позже.',
+      );
     }
   }
 
@@ -3965,44 +4018,13 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
     3. Неиспользованные токены сгорают при обновлении периода 
       `;
 
-      // If a Telegram Payments provider token is configured, send a native invoice
-      const telegramProviderToken = this.configService.get<string>(
-        'TELEGRAM_PROVIDER_TOKEN',
-      );
-
-      if (telegramProviderToken) {
-        try {
-          const prices = [
-            { label: `${packageName}`, amount: amount * 100 }, // amount in cents
-          ];
-
-          // sendInvoice fields: chatId, title, description, payload, provider_token, start_parameter, currency, prices
-          await (this.bot as any).sendInvoice(
-            chatId,
-            `${packageName}`,
-            description,
-            `pkg_${paymentData.invoiceId}`,
-            telegramProviderToken,
-            `start_${paymentData.invoiceId}`,
-            'RUB',
-            prices,
-          );
-
-          return;
-        } catch (err) {
-          this.logger.warn(
-            'Failed to send Telegram invoice, falling back to web payment',
-            err,
-          );
-        }
-      }
-
+      // Show payment options with both Robokassa and Telegram Stars
       const keyboard = {
         inline_keyboard: [
           [
             {
               text: `TG STARS ${amount}💫`,
-              pay: true,
+              callback_data: `pay_stars:${paymentData.invoiceId}:${amount}:${packageName}`,
             },
           ],
           [
