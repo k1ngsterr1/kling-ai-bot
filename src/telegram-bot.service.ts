@@ -161,9 +161,34 @@ export class TelegramBotService {
     // Answer pre-checkout queries from Telegram (required for payments)
     this.bot.on('pre_checkout_query', async (preCheckoutQuery) => {
       try {
+        this.logger.log(`[STARS PAYMENT] Pre-checkout query received:`);
+        this.logger.log(`[STARS PAYMENT] Query ID: ${preCheckoutQuery.id}`);
+        this.logger.log(
+          `[STARS PAYMENT] From user: ${preCheckoutQuery.from.id} (${preCheckoutQuery.from.first_name})`,
+        );
+        this.logger.log(
+          `[STARS PAYMENT] Currency: ${preCheckoutQuery.currency}`,
+        );
+        this.logger.log(
+          `[STARS PAYMENT] Total amount: ${preCheckoutQuery.total_amount}`,
+        );
+        this.logger.log(
+          `[STARS PAYMENT] Invoice payload: ${preCheckoutQuery.invoice_payload}`,
+        );
+        this.logger.log(
+          `[STARS PAYMENT] Full query data: ${JSON.stringify(preCheckoutQuery, null, 2)}`,
+        );
+
         await this.bot.answerPreCheckoutQuery(preCheckoutQuery.id, true);
+
+        this.logger.log(
+          `[STARS PAYMENT] ✅ Pre-checkout query answered successfully`,
+        );
       } catch (err) {
-        this.logger.error('Error answering pre_checkout_query:', err);
+        this.logger.error(
+          `[STARS PAYMENT] ❌ Error answering pre_checkout_query:`,
+          err,
+        );
       }
     });
 
@@ -684,12 +709,19 @@ ${subscriptionStatus}
     amount: number,
     packageName: string,
   ) {
+    this.logger.log(
+      `[STARS PAYMENT] Starting payment process for chat ${chatId}, invoice ${invoiceId}, amount ${amount} stars, package "${packageName}"`,
+    );
+
     try {
       const payment = await this.prisma.payment.findFirst({
         where: { invoiceId: invoiceId.toString() },
       });
 
       if (!payment) {
+        this.logger.warn(
+          `[STARS PAYMENT] Payment not found for invoice ${invoiceId}`,
+        );
         await this.bot.sendMessage(
           chatId,
           '❌ Платёж не найден. Попробуйте еще раз.',
@@ -697,29 +729,67 @@ ${subscriptionStatus}
         return;
       }
 
-      // Send Telegram Stars invoice according to official docs
-      // https://core.telegram.org/bots/payments-stars
-      const prices = JSON.stringify([
-        {
-          label: packageName,
-          amount: amount, // amount in stars (not cents)
-        },
-      ]);
-
-      await (this.bot as any).sendInvoice(
-        chatId, // chat_id
-        packageName, // title
-        payment.description || `Пакет ${packageName}`, // description
-        `pkg_${invoiceId}`, // payload
-        '', // provider_token - empty string for Telegram Stars
-        `start_${invoiceId}`, // start_parameter
-        'XTR', // currency - always XTR for Telegram Stars
-        prices, // prices as JSON string
+      this.logger.log(
+        `[STARS PAYMENT] Payment found: ${JSON.stringify({
+          id: payment.id,
+          userId: payment.userId,
+          amount: payment.amount,
+          description: payment.description,
+          status: payment.status,
+        })}`,
       );
+
+      // Send Telegram Stars invoice using direct HTTP request
+      // because node-telegram-bot-api might not fully support XTR currency
+      const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+      const url = `https://api.telegram.org/bot${token}/sendInvoice`;
+
+      const invoiceData = {
+        chat_id: chatId,
+        title: packageName,
+        description: payment.description || `Пакет ${packageName}`,
+        payload: `pkg_${invoiceId}`,
+        provider_token: '', // empty for Telegram Stars
+        start_parameter: `start_${invoiceId}`,
+        currency: 'XTR', // Telegram Stars currency
+        prices: [
+          {
+            label: packageName,
+            amount: amount, // amount in stars
+          },
+        ],
+      };
 
       this.logger.log(
-        `Telegram Stars invoice sent successfully for ${amount} stars to chat ${chatId}`,
+        `[STARS PAYMENT] Sending invoice request to Telegram API:`,
       );
+      this.logger.log(
+        `[STARS PAYMENT] URL: ${url.replace(token || '', 'HIDDEN_TOKEN')}`,
+      );
+      this.logger.log(
+        `[STARS PAYMENT] Invoice data: ${JSON.stringify(invoiceData, null, 2)}`,
+      );
+
+      const axios = require('axios');
+      const response = await axios.post(url, invoiceData);
+
+      this.logger.log(
+        `[STARS PAYMENT] Telegram API response status: ${response.status}`,
+      );
+      this.logger.log(
+        `[STARS PAYMENT] Telegram API response data: ${JSON.stringify(response.data, null, 2)}`,
+      );
+
+      if (response.data.ok) {
+        this.logger.log(
+          `[STARS PAYMENT] ✅ SUCCESS: Telegram Stars invoice sent successfully for ${amount} stars to chat ${chatId}`,
+        );
+      } else {
+        this.logger.error(
+          `[STARS PAYMENT] ❌ FAILED: Telegram API returned error: ${JSON.stringify(response.data)}`,
+        );
+        throw new Error(`Telegram API error: ${JSON.stringify(response.data)}`);
+      }
     } catch (error) {
       this.logger.error('Error sending Telegram Stars invoice:', error);
       await this.bot.sendMessage(
@@ -4065,9 +4135,22 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
 
   // Handle successful native Telegram payments
   private async handleSuccessfulPayment(msg: TelegramBot.Message) {
+    this.logger.log(
+      `[STARS PAYMENT] Successful payment received from chat ${msg.chat.id}`,
+    );
+
     try {
       const pay = (msg as any).successful_payment;
-      if (!pay) return;
+      if (!pay) {
+        this.logger.warn(
+          `[STARS PAYMENT] No successful_payment data in message`,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `[STARS PAYMENT] Payment details: ${JSON.stringify(pay, null, 2)}`,
+      );
 
       // Payload was set as pkg_<invoiceId>
       const payload = pay.invoice_payload || '';
@@ -4075,22 +4158,42 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
         ? payload.replace('pkg_', '')
         : undefined;
 
+      this.logger.log(
+        `[STARS PAYMENT] Extracted invoice ID: ${invoiceId} from payload: ${payload}`,
+      );
+
       if (invoiceId) {
         const payment = await this.prisma.payment.findFirst({
           where: { invoiceId: invoiceId.toString() },
         });
 
+        this.logger.log(
+          `[STARS PAYMENT] Database payment found: ${payment ? 'Yes' : 'No'}`,
+        );
+
         if (payment) {
+          this.logger.log(
+            `[STARS PAYMENT] Payment status: ${payment.status}, Amount: ${payment.amount}, User: ${payment.userId}`,
+          );
+
           if (payment.status !== 'completed') {
             await this.prisma.payment.update({
               where: { id: payment.id },
               data: { status: 'completed' },
             });
 
+            this.logger.log(
+              `[STARS PAYMENT] Payment status updated to completed`,
+            );
+
             const userIdNum = Number(payment.userId);
             if (!isNaN(userIdNum)) {
               const v = payment.videoTokensGranted || 0;
               const i = payment.imageTokensGranted || 0;
+
+              this.logger.log(
+                `[STARS PAYMENT] Granting tokens to user ${userIdNum}: ${v} video, ${i} image`,
+              );
 
               await this.addTokensToUser(userIdNum, v, i);
 
@@ -4098,6 +4201,10 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
               await this.bot.sendMessage(
                 userIdNum,
                 `✅ Оплата подтверждена. На ваш баланс зачислены токены: 🎬 ${v} / 🖼️ ${i}`,
+              );
+
+              this.logger.log(
+                `[STARS PAYMENT] ✅ User ${userIdNum} notified about successful payment`,
               );
 
               // Notify admins
