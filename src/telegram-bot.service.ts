@@ -3999,11 +3999,10 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
 
       const keyboard = {
         inline_keyboard: [
-          // TG STARS: fallback to manual stars request
           [
             {
               text: `TG STARS ${amount}💫`,
-              callback_data: `pay_with_stars:${paymentData.invoiceId}`,
+              pay: true,
             },
           ],
           [
