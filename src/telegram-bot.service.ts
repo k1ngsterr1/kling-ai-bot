@@ -654,17 +654,14 @@ ${subscriptionStatus}
       case 'image_ratio_16:9':
         this.handleImageAspectRatioChoice(chatId, '16:9');
         break;
-      case 'buy_package_100':
-        this.handleBuyPackage(chatId, 100, 'Пакет СТАРТ');
+      case 'buy_package_1200':
+        this.handleBuyPackage(chatId, 1200, 'Пакет СТАРТ');
         break;
-      case 'buy_package_500':
-        this.handleBuyPackage(chatId, 500, 'Пакет БАЗОВЫЙ');
+      case 'buy_package_2230':
+        this.handleBuyPackage(chatId, 2230, 'Пакет ПРОДВИНУТЫЙ');
         break;
-      case 'buy_package_1000':
-        this.handleBuyPackage(chatId, 1000, 'Пакет ПРОДВИНУТЫЙ');
-        break;
-      case 'buy_package_2000':
-        this.handleBuyPackage(chatId, 2000, 'Пакет ПРОФИ');
+      case 'buy_package_4320':
+        this.handleBuyPackage(chatId, 4320, 'Пакет ПРОФИ');
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
