@@ -455,7 +455,7 @@ ${subscriptionStatus}
       const parts = data.split('_');
       const packageName = parts.slice(2, -1).join(' '); // Extract package name
       const price = parseInt(parts[parts.length - 1]); // Extract price
-      this.handleBuyPackage(chatId, price, packageName);
+      this.handleStarsPurchase(chatId, packageName, price);
       return;
     }
 
@@ -463,7 +463,7 @@ ${subscriptionStatus}
       const parts = data.split('_');
       const packageName = parts.slice(2, -1).join(' '); // Extract package name
       const price = parseInt(parts[parts.length - 1]); // Extract price
-      this.handleBuyPackage(chatId, price, packageName);
+      this.handleCardPurchase(chatId, packageName, price);
       return;
     }
 
@@ -2583,6 +2583,127 @@ ${selectedPlan.name}
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
   }
 
+  // Handle Stars payment purchase
+  private async handleStarsPurchase(
+    chatId: number,
+    packageName: string,
+    price: number,
+  ) {
+    try {
+      // Убеждаемся, что пользователь существует в базе данных
+      await this.ensureUserExists(chatId);
+
+      // Определяем количество токенов для каждого пакета (по названию)
+      const packageDetails = this.getPackageDetailsByName(packageName);
+
+      // Создаем описание для платежа
+      const description = `${packageName} - ${packageDetails.videoTokens} видео-токенов + ${packageDetails.imageTokens} токенов изображений`;
+
+      // Создаем запись в базе данных для отслеживания
+      const payment = await this.prisma.payment.create({
+        data: {
+          invoiceId: Date.now().toString(),
+          userId: chatId.toString(),
+          amount: price,
+          packageType: 'tokens',
+          description: description,
+          status: 'pending',
+          videoTokensGranted: packageDetails.videoTokens,
+          imageTokensGranted: packageDetails.imageTokens,
+        },
+      });
+
+      // Отправляем инвойс Telegram Stars
+      await this.handlePayStars(chatId, payment.invoiceId, price, packageName);
+    } catch (error) {
+      this.logger.error('Error in handleStarsPurchase:', error);
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка при создании платежа. Попробуйте позже.',
+      );
+    }
+  }
+
+  // Handle Card payment purchase
+  private async handleCardPurchase(
+    chatId: number,
+    packageName: string,
+    price: number,
+  ) {
+    try {
+      // Убеждаемся, что пользователь существует в базе данных
+      await this.ensureUserExists(chatId);
+
+      // Определяем количество токенов для каждого пакета (по названию)
+      const packageDetails = this.getPackageDetailsByName(packageName);
+
+      // Создаем описание для платежа
+      const description = `${packageName} - ${packageDetails.videoTokens} видео-токенов + ${packageDetails.imageTokens} токенов изображений`;
+
+      // Создаем URL для оплаты через Robokassa
+      const paymentData = await this.robokassaService.createPaymentUrl({
+        userId: chatId,
+        amount: price,
+        description: description,
+      });
+
+      // Сохраняем информацию о платеже в базе данных
+      await this.prisma.payment.create({
+        data: {
+          invoiceId: paymentData.invoiceId.toString(),
+          userId: chatId.toString(),
+          amount: price,
+          packageType: 'tokens',
+          description: description,
+          status: 'pending',
+          videoTokensGranted: packageDetails.videoTokens,
+          imageTokensGranted: packageDetails.imageTokens,
+        },
+      });
+
+      const message = `
+    ✅ ВЫ ВЫБРАЛИ: <b>${packageName}</b>
+
+    💰 Сумма: ${price} ₽
+    🎬 ${packageDetails.videoTokens} Видео-токенов
+    📸 ${packageDetails.imageTokens} Токенов изображений
+
+    💳 <b>СТОИМОСТЬ</b>: ${price} ₽
+
+    Нажмите кнопку ниже для перехода к оплате:
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: `💳 ОПЛАТИТЬ ${price}₽`,
+              url: paymentData.paymentUrl,
+            },
+          ],
+          [
+            {
+              text: '📄 Оферта',
+              url: 'https://teletype.in/@help_24/oferta_kling',
+            },
+          ],
+          [{ text: '🔙 Назад', callback_data: 'additional_packages' }],
+        ],
+      };
+
+      await this.bot.sendMessage(chatId, message, {
+        reply_markup: keyboard,
+        parse_mode: 'HTML',
+      });
+    } catch (error) {
+      this.logger.error('Error in handleCardPurchase:', error);
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка при создании платежа. Попробуйте позже.',
+      );
+    }
+  }
+
   private isAdmin(userId?: number): boolean {
     return userId ? this.adminIds.includes(userId) : false;
   }
@@ -4279,6 +4400,29 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
         return { videoTokens: 100, imageTokens: 200 };
       default:
         return { videoTokens: 1, imageTokens: 3 };
+    }
+  }
+
+  private getPackageDetailsByName(packageName: string): {
+    videoTokens: number;
+    imageTokens: number;
+  } {
+    // Map package names to token amounts
+    switch (packageName.toLowerCase()) {
+      case '50 video':
+        return { videoTokens: 50, imageTokens: 0 };
+      case '100 video':
+        return { videoTokens: 100, imageTokens: 0 };
+      case '250 video':
+        return { videoTokens: 250, imageTokens: 0 };
+      case '100 img':
+        return { videoTokens: 0, imageTokens: 100 };
+      case '200 img':
+        return { videoTokens: 0, imageTokens: 200 };
+      case '500 img':
+        return { videoTokens: 0, imageTokens: 500 };
+      default:
+        return { videoTokens: 1, imageTokens: 1 };
     }
   }
 
