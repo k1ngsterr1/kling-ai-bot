@@ -3771,8 +3771,19 @@ ${amount} ₽/мес
 
       const keyboard = {
         inline_keyboard: [
-          [{ text: `💳 Оплатить ${amount} ₽`, url: paymentData.paymentUrl }],
-          [{ text: '🔙 Назад к пакетам', callback_data: 'balance' }],
+          [{ text: `TG STARS ${amount}💫`, url: paymentData.paymentUrl }],
+          [
+            {
+              text: `💳 БАНКОВСКАЯ КАРТА • ${amount}₽`,
+              url: paymentData.paymentUrl,
+            },
+          ],
+          [
+            {
+              text: '📄 Оферта',
+              url: 'https://teletype.in/@help_24/oferta_kling',
+            },
+          ],
         ],
       };
 
