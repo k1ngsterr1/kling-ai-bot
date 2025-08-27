@@ -451,6 +451,22 @@ ${subscriptionStatus}
     this.bot.answerCallbackQuery(callbackQuery.id);
 
     // Handle prefixed callback_data first (dynamic actions)
+    if (data && data.startsWith('buy_stars_')) {
+      const parts = data.split('_');
+      const packageName = parts.slice(2, -1).join(' '); // Extract package name
+      const price = parseInt(parts[parts.length - 1]); // Extract price
+      this.handleBuyPackage(chatId, price, packageName);
+      return;
+    }
+
+    if (data && data.startsWith('buy_card_')) {
+      const parts = data.split('_');
+      const packageName = parts.slice(2, -1).join(' '); // Extract package name
+      const price = parseInt(parts[parts.length - 1]); // Extract price
+      this.handleBuyPackage(chatId, price, packageName);
+      return;
+    }
+
     if (data && data.startsWith('pay_stars:')) {
       const parts = data.split(':');
       const invoiceId = parts[1];
@@ -2550,14 +2566,14 @@ ${selectedPlan.name}
       inline_keyboard: [
         [
           {
-            text: '💳 Купить пакет',
-            callback_data: `purchase_package_${packageName.replace(' ', '_')}`,
+            text: `� TG STARS • ${price} 💫`,
+            callback_data: `buy_stars_${packageName.replace(/\s+/g, '_')}_${price}`,
           },
         ],
         [
           {
-            text: '💳 Купить пакет',
-            callback_data: `purchase_package_${packageName.replace(' ', '_')}`,
+            text: `💳 БАНКОВСКАЯ КАРТА • ${price}₽`,
+            callback_data: `buy_card_${packageName.replace(/\s+/g, '_')}_${price}`,
           },
         ],
         [{ text: 'Назад', callback_data: 'main' }],
