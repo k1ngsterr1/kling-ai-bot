@@ -55,14 +55,17 @@ export class TelegramBotService {
   > = new Map();
 
   // Активные задачи на проверку изображений
-  private activeImageChecks: Map<string, {
-    chatId: number;
-    imageId: string;
-    progressMessageId: number;
-    intervalId: NodeJS.Timeout;
-    attempts: number;
-    startTime: Date;
-  }> = new Map();
+  private activeImageChecks: Map<
+    string,
+    {
+      chatId: number;
+      imageId: string;
+      progressMessageId: number;
+      intervalId: NodeJS.Timeout;
+      attempts: number;
+      startTime: Date;
+    }
+  > = new Map();
 
   constructor(
     private configService: ConfigService,
@@ -152,7 +155,7 @@ export class TelegramBotService {
     this.bot.onText(/\/getimg (.+)/, (msg, match) => {
       const chatId = msg.chat.id;
       const taskId = match ? match[1].trim() : '';
-      
+
       if (!taskId) {
         this.bot.sendMessage(
           chatId,
@@ -165,7 +168,12 @@ export class TelegramBotService {
           {
             reply_markup: {
               inline_keyboard: [
-                [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+                [
+                  {
+                    text: '🖼 Создать новое изображение',
+                    callback_data: 'image',
+                  },
+                ],
                 [{ text: '🏠 Главное меню', callback_data: 'main' }],
               ],
             },
@@ -1677,8 +1685,10 @@ ID: #${videoId}
 
       if (result && result.imageUrl) {
         // Изображение готово
-        this.logger.log(`Found completed image for ${taskId}: ${result.imageUrl}`);
-        
+        this.logger.log(
+          `Found completed image for ${taskId}: ${result.imageUrl}`,
+        );
+
         try {
           await this.bot.sendPhoto(chatId, result.imageUrl, {
             caption: `🎉 Изображение найдено и готово!
@@ -1700,7 +1710,10 @@ ID: ${taskId}
             },
           });
         } catch (photoError) {
-          this.logger.warn('Could not send photo directly, sending as text:', photoError);
+          this.logger.warn(
+            'Could not send photo directly, sending as text:',
+            photoError,
+          );
           await this.bot.sendMessage(
             chatId,
             `🎉 Изображение найдено и готово!
@@ -1739,13 +1752,14 @@ ID: ${taskId}
       // Если результата нет, проверяем статус
       try {
         const status = await this.klingAiService.getImageStatus(taskId);
-        
+
         if (status.status === 'failed') {
           let failureReason = 'Неизвестная причина';
 
           if (status.errorMessage) {
             if (status.errorMessage.includes('risk control system')) {
-              failureReason = 'Блокировка системой контроля (неподходящий контент)';
+              failureReason =
+                'Блокировка системой контроля (неподходящий контент)';
             } else if (status.errorMessage.includes('time out')) {
               failureReason = 'Превышено время ожидания';
             } else {
@@ -1789,8 +1803,18 @@ ID: ${taskId}
             {
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔄 Проверить еще раз', callback_data: `fetch_img_${taskId}` }],
-                  [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+                  [
+                    {
+                      text: '🔄 Проверить еще раз',
+                      callback_data: `fetch_img_${taskId}`,
+                    },
+                  ],
+                  [
+                    {
+                      text: '🖼 Создать новое изображение',
+                      callback_data: 'image',
+                    },
+                  ],
                   [{ text: '🏠 Главное меню', callback_data: 'main' }],
                 ],
               },
@@ -1808,7 +1832,12 @@ ID: ${taskId}
             {
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔄 Проверить еще раз', callback_data: `fetch_img_${taskId}` }],
+                  [
+                    {
+                      text: '🔄 Проверить еще раз',
+                      callback_data: `fetch_img_${taskId}`,
+                    },
+                  ],
                   [{ text: '🏠 Главное меню', callback_data: 'main' }],
                 ],
               },
@@ -1835,7 +1864,12 @@ ID: ${taskId}
           {
             reply_markup: {
               inline_keyboard: [
-                [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+                [
+                  {
+                    text: '🖼 Создать новое изображение',
+                    callback_data: 'image',
+                  },
+                ],
                 [{ text: '🏠 Главное меню', callback_data: 'main' }],
               ],
             },
@@ -1849,7 +1883,6 @@ ID: ${taskId}
       } catch (deleteError) {
         this.logger.warn('Could not delete loading message:', deleteError);
       }
-
     } catch (error) {
       this.logger.error('Error in handleFetchImageCommand:', error);
       await this.bot.sendMessage(
@@ -1865,7 +1898,12 @@ ID: ${taskId}
         {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+              [
+                {
+                  text: '🖼 Создать новое изображение',
+                  callback_data: 'image',
+                },
+              ],
               [{ text: '🏠 Главное меню', callback_data: 'main' }],
             ],
           },
@@ -1893,23 +1931,30 @@ ID: ${taskId}
     // Функция проверки
     const checkImage = async () => {
       attempts++;
-      
+
       try {
-        this.logger.log(`Checking image ${imageId}, attempt ${attempts}/${maxAttempts}`);
+        this.logger.log(
+          `Checking image ${imageId}, attempt ${attempts}/${maxAttempts}`,
+        );
 
         // Пытаемся получить готовый результат напрямую (как в fetch-image-by-id.js)
         let imageResult: any = null;
-        
+
         try {
           imageResult = await this.klingAiService.getImageResult(imageId);
         } catch (resultError) {
-          this.logger.warn(`Could not get direct result for ${imageId}:`, resultError);
+          this.logger.warn(
+            `Could not get direct result for ${imageId}:`,
+            resultError,
+          );
         }
 
         // Если получили результат - отправляем пользователю и завершаем проверку
         if (imageResult && imageResult.imageUrl) {
-          this.logger.log(`✅ Image ${imageId} is ready! URL: ${imageResult.imageUrl}`);
-          
+          this.logger.log(
+            `✅ Image ${imageId} is ready! URL: ${imageResult.imageUrl}`,
+          );
+
           try {
             await this.bot.sendPhoto(chatId, imageResult.imageUrl, {
               caption: `🎉 Ваше изображение готово!
@@ -1935,11 +1980,16 @@ ID: ${imageId}
             try {
               await this.bot.deleteMessage(chatId, progressMessageId);
             } catch (deleteError) {
-              this.logger.warn('Could not delete progress message:', deleteError);
+              this.logger.warn(
+                'Could not delete progress message:',
+                deleteError,
+              );
             }
-
           } catch (imageError) {
-            this.logger.warn('Could not send image, sending as text:', imageError);
+            this.logger.warn(
+              'Could not send image, sending as text:',
+              imageError,
+            );
             await this.bot.sendMessage(
               chatId,
               `🎉 Ваше изображение готово!
@@ -1984,7 +2034,8 @@ ID: ${imageId}
 
           if (status.errorMessage) {
             if (status.errorMessage.includes('risk control system')) {
-              failureReason = 'Блокировка системой контроля (неподходящий контент)';
+              failureReason =
+                'Блокировка системой контроля (неподходящий контент)';
             } else if (status.errorMessage.includes('time out')) {
               failureReason = 'Превышено время ожидания';
             } else {
@@ -2030,10 +2081,16 @@ ID: ${imageId}
         if (attempts < maxAttempts) {
           // Рассчитываем прогресс на основе времени и попыток
           const timeElapsed = Date.now() - startTime.getTime();
-          const timeProgress = Math.min((timeElapsed / (10 * 60 * 1000)) * 100, 90); // 10 минут = 90%
+          const timeProgress = Math.min(
+            (timeElapsed / (10 * 60 * 1000)) * 100,
+            90,
+          ); // 10 минут = 90%
           const attemptProgress = (attempts / maxAttempts) * 100;
-          const progress = Math.min(Math.max(timeProgress, attemptProgress), 95);
-          
+          const progress = Math.min(
+            Math.max(timeProgress, attemptProgress),
+            95,
+          );
+
           const progressBar = this.createProgressBar(progress);
 
           const updatedText = `⏳ Генерация изображения...
@@ -2062,7 +2119,9 @@ ID: ${imageId}
 
         // Если достигли максимума попыток - завершаем с тайм-аутом
         if (attempts >= maxAttempts) {
-          this.logger.warn(`Max attempts reached for ${imageId}, stopping check`);
+          this.logger.warn(
+            `Max attempts reached for ${imageId}, stopping check`,
+          );
 
           await this.bot.sendMessage(
             chatId,
@@ -2091,9 +2150,11 @@ ID: ${imageId}
           this.stopImageCheck(imageId);
           return;
         }
-
       } catch (error) {
-        this.logger.error(`Error checking image ${imageId}, attempt ${attempts}:`, error);
+        this.logger.error(
+          `Error checking image ${imageId}, attempt ${attempts}:`,
+          error,
+        );
 
         if (attempts >= maxAttempts) {
           await this.bot.sendMessage(
@@ -2141,7 +2202,9 @@ ID: ${imageId}
     // Запускаем первую проверку через 10 секунд
     setTimeout(checkImage, 10000);
 
-    this.logger.log(`Started automatic image check for ${imageId} (chatId: ${chatId})`);
+    this.logger.log(
+      `Started automatic image check for ${imageId} (chatId: ${chatId})`,
+    );
   }
 
   // Метод для остановки проверки изображения
@@ -2763,7 +2826,7 @@ ${
         name: '💎 СТАРТ',
         videos: 25,
         images: 100,
-        price: 1200,
+        price: 1,
         description: 'Базовый пакет • идеален для тестирования',
         oldPrice: undefined as number | undefined,
       },
