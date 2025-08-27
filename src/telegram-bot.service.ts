@@ -396,6 +396,25 @@ ${subscriptionStatus}
     // Answer the callback query to remove loading state
     this.bot.answerCallbackQuery(callbackQuery.id);
 
+    // Handle prefixed callback_data first (dynamic actions)
+    if (data && data.startsWith('pay_with_stars:')) {
+      const invoiceId = data.split(':')[1];
+      this.handlePayWithStars(chatId, invoiceId);
+      return;
+    }
+
+    if (data && data.startsWith('admin_confirm_stars:')) {
+      const invoiceId = data.split(':')[1];
+      this.handleAdminConfirmStars(chatId, invoiceId);
+      return;
+    }
+
+    if (data && data.startsWith('admin_cancel_stars:')) {
+      const invoiceId = data.split(':')[1];
+      this.handleAdminCancelStars(chatId, invoiceId);
+      return;
+    }
+
     switch (data) {
       case 'main':
         this.userStates.delete(chatId); // Clear user state
@@ -619,6 +638,166 @@ ${subscriptionStatus}
         break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
+    }
+  }
+
+  // Обработчик запроса оплаты звездами (пользователь нажал 'TG STARS')
+  private async handlePayWithStars(chatId: number, invoiceId: string) {
+    try {
+      const payment = await this.prisma.payment.findFirst({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ Платёж не найден. Попробуйте еще раз или напишите в поддержку.',
+        );
+        return;
+      }
+
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'requested_stars' },
+      });
+
+      const adminMessage = `🟡 Запрос на оплату звездами\nПользователь: ${chatId}\nПлатёж ID: ${invoiceId}\nСумма: ${payment.amount} ₽\nОписание: ${payment.description || '—'}\n\nПодтвердите оплату вручную и обновите статус платежа.`;
+
+      for (const adminId of this.adminIds) {
+        try {
+          await this.bot.sendMessage(adminId, adminMessage, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: `✅ Подтвердить ${invoiceId}`,
+                    callback_data: `admin_confirm_stars:${invoiceId}`,
+                  },
+                  {
+                    text: `❌ Отменить ${invoiceId}`,
+                    callback_data: `admin_cancel_stars:${invoiceId}`,
+                  },
+                ],
+              ],
+            },
+          });
+        } catch (err) {
+          this.logger.warn(`Could not notify admin ${adminId}:`, err);
+        }
+      }
+
+      await this.bot.sendMessage(
+        chatId,
+        '✅ Запрос на оплату звездами отправлен администраторам. После подтверждения вы получите токены. Ожидайте уведомления.',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
+            ],
+          },
+        },
+      );
+    } catch (error) {
+      this.logger.error('Error handling pay_with_stars:', error);
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Не удалось обработать запрос на оплату звездами. Попробуйте позже.',
+      );
+    }
+  }
+
+  // Admin confirms the stars payment: mark as completed and grant tokens
+  private async handleAdminConfirmStars(
+    adminChatId: number,
+    invoiceId: string,
+  ) {
+    try {
+      const payment = await this.prisma.payment.findFirst({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        await this.bot.sendMessage(adminChatId, 'Платёж не найден.');
+        return;
+      }
+
+      if (payment.status === 'completed') {
+        await this.bot.sendMessage(adminChatId, 'Платёж уже подтверждён.');
+        return;
+      }
+
+      // Update payment status
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'completed' },
+      });
+
+      // Grant tokens to user
+      const userIdNum = Number(payment.userId);
+      if (!isNaN(userIdNum)) {
+        // Use existing token add method if available, else update map
+        const packageDetails = {
+          videoTokens: payment.videoTokensGranted || 0,
+          imageTokens: payment.imageTokensGranted || 0,
+        };
+
+        await this.addTokensToUser(
+          userIdNum,
+          packageDetails.videoTokens,
+          packageDetails.imageTokens,
+        );
+
+        await this.bot.sendMessage(
+          userIdNum,
+          `✅ Оплата подтверждена администрацией. На ваш баланс зачислены токены: 🎬 ${packageDetails.videoTokens} / 🖼️ ${packageDetails.imageTokens}`,
+        );
+      }
+
+      await this.bot.sendMessage(
+        adminChatId,
+        `✅ Платёж ${invoiceId} подтверждён и токены зачислены.`,
+      );
+    } catch (error) {
+      this.logger.error('Error confirming stars payment:', error);
+      await this.bot.sendMessage(
+        adminChatId,
+        'Ошибка при подтверждении платежа.',
+      );
+    }
+  }
+
+  // Admin cancels the stars payment
+  private async handleAdminCancelStars(adminChatId: number, invoiceId: string) {
+    try {
+      const payment = await this.prisma.payment.findFirst({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        await this.bot.sendMessage(adminChatId, 'Платёж не найден.');
+        return;
+      }
+
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'cancelled' },
+      });
+
+      const userIdNum = Number(payment.userId);
+      if (!isNaN(userIdNum)) {
+        await this.bot.sendMessage(
+          userIdNum,
+          `❌ Платёж ${invoiceId} отменён администрацией. Токены не были зачислены.`,
+        );
+      }
+
+      await this.bot.sendMessage(
+        adminChatId,
+        `❌ Платёж ${invoiceId} отменён.`,
+      );
+    } catch (error) {
+      this.logger.error('Error cancelling stars payment:', error);
+      await this.bot.sendMessage(adminChatId, 'Ошибка при отмене платежа.');
     }
   }
 
@@ -2061,22 +2240,15 @@ ${
     let text = '';
 
     if (plan === 'start') {
+      const packageName = selectedPlan.name || 'СТАРТОВЫЙ ПАКЕТ';
+      const amount = selectedPlan.price || 1200;
       text = `
-✅ ВЫ ВЫБРАЛИ: СТАРТОВЫЙ ПАКЕТ
+✅ ВЫ ВЫБРАЛИ: ${packageName}
+💰 Сумма: ${amount} ₽
+🎬 Видео-токены: ${selectedPlan.videos}
+📸 Токены изображений: ${selectedPlan.images}
 
-▫️ **Срок действия**: 1 месяц
-▫️ **Автопродление**: Да (ежемесячно)
-
-📊 **ВКЛЮЧЕНО В ПАКЕТ**:
-🎬 25 video -токенов
-🖼️ 100 img -токенов
-
-💳 **СТОИМОСТЬ ПОДПИСКИ**:
-1200 ₽/мес
-
-⚠️ **ВАЖНЫЕ УСЛОВИЯ**:
-1. Подписка автоматически продлевается за 1 день до окончания периода
-2. Отменить можно в любой момент в разделе "Баланс"
+Нажмите кнопку ниже для перехода к оплате:
       `;
     } else {
       const savingsText = selectedPlan.oldPrice
@@ -3750,28 +3922,23 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       });
 
       const message = `
-✅ ВЫ ВЫБРАЛИ ${packageName}
+✅ ВЫ ВЫБРАЛИ:${packageName}
+💰 Сумма: ${amount} ₽
+🎬 Видео-токены: ${packageDetails.videoTokens}
+📸 Токены изображений: ${packageDetails.imageTokens}
 
-▫️ **Срок действия**: 1 месяц  
-▫️ **Автопродление**: Да (ежемесячно)  
-
-📊 **ВКЛЮЧЕНО В ПАКЕТ**: 
-🎬 ${packageDetails.videoTokens} video-токенов
-📸 ${packageDetails.imageTokens} img-токенов
-
-💳 **СТОИМОСТЬ ПОДПИСКИ**:  
-${amount} ₽/мес
-
-⚠️ **ВАЖНЫЕ УСЛОВИЯ**:  
-1. Нажимая оплатить я даю согласие на регулярные списания, на обработку персональных данных и принимаю условия публичной оферты 
-2. Отменить можно в любой момент в разделе "Баланс"  
-3. Неиспользованные токены сгорают при обновлении периода 
-
+Нажмите кнопку ниже для перехода к оплате:
       `;
 
       const keyboard = {
         inline_keyboard: [
-          [{ text: `TG STARS ${amount}💫`, url: paymentData.paymentUrl }],
+          // TG STARS теперь вызывает callback для ручной оплаты звездами (invoiceId)
+          [
+            {
+              text: `TG STARS ${amount}💫`,
+              callback_data: `pay_with_stars:${paymentData.invoiceId}`,
+            },
+          ],
           [
             {
               text: `💳 БАНКОВСКАЯ КАРТА • ${amount}₽`,
