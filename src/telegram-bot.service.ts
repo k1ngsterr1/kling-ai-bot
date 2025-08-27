@@ -329,8 +329,8 @@ ${subscriptionStatus}
           [{ text: '🔹 ПРОФИ (2000₽)', callback_data: 'buy_package_2000' }],
           [
             {
-              text: 'ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
-              callback_data: 'buy_package_2000',
+              text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
+              callback_data: 'additional_packages',
             },
           ],
 
@@ -2299,34 +2299,31 @@ ${selectedPlan.name}
 💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ
 
 🎬 Video-ТОКЕНЫ:
-▫️ 50 видео • 2240₽
-🔥 100 видео • 4256₽ • ~~4480₽~~ (-5%)
-🔥 250 видео • 9968₽ • ~~11200₽~~ (-11%)
+▫️ 50 видео · 2240₽
+🔥 100 видео · 4256₽ · ~~4480₽~~ (-5%)
+🔥 250 видео · 9968₽ · ~~11200₽~~ (-11%)
 
-�️ Image-ТОКЕНЫ:
-▫️ 100 изо • 449₽
-🔥 200 изо • 790₽ • ~~898₽~~ (-12%)
-🔥 500 изо • 1900₽ • ~~2245₽~~ (-15%)
+🖼️ Image-ТОКЕНЫ:
+▫️ 100 изо · 449₽
+🔥 200 изо · 790₽ · ~~898₽~~ (-12%)
+🔥 500 изо · 1900₽ · ~~2245₽~~ (-15%)
 
-✨ Преимущества:
-• Токены не сгорают
-• Без ежемесячных списаний
-• Используй когда удобно
+Покупай генерации, без подписок и ограничений.
     `;
 
     const keyboard = {
       inline_keyboard: [
         [
-          { text: '🎬 50 video | 2240₽', callback_data: 'buy_50_video' },
-          { text: '🖼️ 100 img | 449₽', callback_data: 'buy_100_img' },
+          { text: '🎬 50 видео · 2240₽', callback_data: 'buy_50_video' },
+          { text: '🖼️ 100 img · 449₽', callback_data: 'buy_100_img' },
         ],
         [
-          { text: '� 100 video | 4256₽', callback_data: 'buy_100_video' },
-          { text: '🔥 200 img | 790₽', callback_data: 'buy_200_img' },
+          { text: '🔥 100 видео · 4256₽', callback_data: 'buy_100_video' },
+          { text: '🔥 200 img · 790₽', callback_data: 'buy_200_img' },
         ],
         [
-          { text: '🔥 250 video | 9968₽', callback_data: 'buy_250_video' },
-          { text: '🔥 500 img | 1900₽', callback_data: 'buy_500_img' },
+          { text: '🔥 250 видео · 9968₽', callback_data: 'buy_250_video' },
+          { text: '🔥 500 img · 1900₽', callback_data: 'buy_500_img' },
         ],
         [
           { text: '◀️ Назад', callback_data: 'balance' },
