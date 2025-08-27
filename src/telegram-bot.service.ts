@@ -54,6 +54,16 @@ export class TelegramBotService {
     }
   > = new Map();
 
+  // Активные задачи на проверку изображений
+  private activeImageChecks: Map<string, {
+    chatId: number;
+    imageId: string;
+    progressMessageId: number;
+    intervalId: NodeJS.Timeout;
+    attempts: number;
+    startTime: Date;
+  }> = new Map();
+
   constructor(
     private configService: ConfigService,
     private klingAiService: KlingAiService,
@@ -133,6 +143,35 @@ export class TelegramBotService {
     this.bot.onText(/\/admin/, (msg) => {
       const chatId = msg.chat.id;
       this.handleAdminCommand(chatId, msg.from?.id);
+    });
+
+    // Handle get image command with ID parameter
+    this.bot.onText(/\/getimg (.+)/, (msg, match) => {
+      const chatId = msg.chat.id;
+      const taskId = match ? match[1].trim() : '';
+      
+      if (!taskId) {
+        this.bot.sendMessage(
+          chatId,
+          `❌ Укажите ID задачи
+
+Использование: /getimg [ID]
+Пример: /getimg 789627571846647814
+
+💡 ID задачи вы получили при создании изображения.`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
+        );
+        return;
+      }
+
+      this.handleFetchImageCommand(chatId, taskId);
     });
 
     // Handle callback queries from inline keyboards
@@ -1625,23 +1664,26 @@ ID: #${videoId}
   // Helper: fetch a Kling AI image by task id and send to chat
   private async handleFetchImageCommand(chatId: number, taskId: string) {
     try {
-      await this.bot.sendMessage(chatId, `🔍 Проверяю задачу: ${taskId} ...`);
+      const loadingMsg = await this.bot.sendMessage(
+        chatId,
+        `🔍 Проверяю статус задачи: ${taskId}...`,
+      );
 
+      // Пытаемся получить результат напрямую
       const result = await this.klingAiService.getImageResult(taskId);
 
-      if (!result) {
-        await this.bot.sendMessage(
-          chatId,
-          `❌ Результат по задаче ${taskId} не найден или ещё не готов. Попробуйте позже.`,
-        );
-        return;
-      }
-
-      if (result.imageUrl) {
-        // Try to send the photo directly
+      if (result && result.imageUrl) {
+        // Изображение готово
+        this.logger.log(`Found completed image for ${taskId}: ${result.imageUrl}`);
+        
         try {
           await this.bot.sendPhoto(chatId, result.imageUrl, {
-            caption: `🎉 Изображение готово!\n\nID: ${taskId}`,
+            caption: `🎉 Изображение найдено и готово!
+
+ID: ${taskId}
+Статус: Завершено ✅
+
+Спасибо за использование нашего сервиса!`,
             reply_markup: {
               inline_keyboard: [
                 [
@@ -1654,24 +1696,177 @@ ID: #${videoId}
               ],
             },
           });
-        } catch (err) {
-          // Fallback: send as message with URL
+        } catch (photoError) {
+          this.logger.warn('Could not send photo directly, sending as text:', photoError);
           await this.bot.sendMessage(
             chatId,
-            `🎉 Изображение готово!\n${result.imageUrl}`,
+            `🎉 Изображение найдено и готово!
+
+ID: ${taskId}
+Статус: Завершено ✅
+📱 Скачать: ${result.imageUrl}
+
+Спасибо за использование нашего сервиса!`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '🖼 Создать еще изображение',
+                      callback_data: 'image',
+                    },
+                  ],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
           );
         }
-      } else {
+
+        // Удаляем сообщение о проверке
+        try {
+          await this.bot.deleteMessage(chatId, loadingMsg.message_id);
+        } catch (deleteError) {
+          this.logger.warn('Could not delete loading message:', deleteError);
+        }
+
+        return;
+      }
+
+      // Если результата нет, проверяем статус
+      try {
+        const status = await this.klingAiService.getImageStatus(taskId);
+        
+        if (status.status === 'failed') {
+          let failureReason = 'Неизвестная причина';
+
+          if (status.errorMessage) {
+            if (status.errorMessage.includes('risk control system')) {
+              failureReason = 'Блокировка системой контроля (неподходящий контент)';
+            } else if (status.errorMessage.includes('time out')) {
+              failureReason = 'Превышено время ожидания';
+            } else {
+              failureReason = status.errorMessage;
+            }
+          }
+
+          await this.bot.sendMessage(
+            chatId,
+            `❌ Генерация изображения не удалась
+
+ID: ${taskId}
+Статус: Ошибка ❌
+Причина: ${failureReason}
+
+💡 Советы:
+• Используйте более нейтральные описания
+• Избегайте упоминаний людей, брендов, насилия
+• Попробуйте изменить формулировку`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Попробовать снова', callback_data: 'image' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+        } else if (status.status === 'processing') {
+          await this.bot.sendMessage(
+            chatId,
+            `⏳ Генерация изображения все еще выполняется
+
+ID: ${taskId}
+Статус: В процессе ⏳
+
+Попробуйте проверить результат через несколько минут командой:
+/getimg ${taskId}
+
+💡 Вы можете создать новое изображение, пока ждёте это.`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Проверить еще раз', callback_data: `fetch_img_${taskId}` }],
+                  [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            `❓ Неизвестный статус задачи
+
+ID: ${taskId}
+Статус: ${status.status}
+
+Попробуйте проверить позже или обратитесь в поддержку.`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Проверить еще раз', callback_data: `fetch_img_${taskId}` }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
+          );
+        }
+      } catch (statusError) {
+        this.logger.warn(`Could not get status for ${taskId}:`, statusError);
         await this.bot.sendMessage(
           chatId,
-          `❌ По задаче ${taskId} нет URL изображения.`,
+          `❌ Не удалось проверить статус задачи
+
+ID: ${taskId}
+
+Возможные причины:
+• Задача не найдена (неверный ID)
+• Временные проблемы с сервисом
+• Задача слишком старая
+
+Попробуйте:
+• Проверить правильность ID
+• Повторить проверку через несколько минут
+• Создать новое изображение`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
         );
       }
+
+      // Удаляем сообщение о проверке
+      try {
+        await this.bot.deleteMessage(chatId, loadingMsg.message_id);
+      } catch (deleteError) {
+        this.logger.warn('Could not delete loading message:', deleteError);
+      }
+
     } catch (error) {
       this.logger.error('Error in handleFetchImageCommand:', error);
       await this.bot.sendMessage(
         chatId,
-        '❌ Ошибка при получении результата. Попробуйте позже.',
+        `❌ Ошибка при проверке результата
+
+Попробуйте:
+• Повторить команду через несколько минут
+• Проверить правильность ID задачи
+• Создать новое изображение
+
+Если проблема продолжается - обратитесь в поддержку.`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🖼 Создать новое изображение', callback_data: 'image' }],
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
+            ],
+          },
+        },
       );
     }
   }
@@ -1681,55 +1876,34 @@ ID: #${videoId}
     imageId: string,
     progressMessageId: number,
   ) {
-    const maxAttempts = 20; // Poll for up to 10 minutes (20 * 30 seconds)
+    const maxAttempts = 30; // Poll for up to 15 minutes (30 * 30 seconds)
     let attempts = 0;
 
     const poll = async () => {
       attempts++;
 
       try {
-        const status = await this.klingAiService.getImageStatus(imageId);
+        // Сначала пытаемся получить статус
+        let status: any = null;
+        let hasStatusMethod = true;
 
-        // Calculate progress based on attempts and status
-        const progress = this.calculateProgress(
-          attempts,
-          maxAttempts,
-          status.status,
-        );
-        const progressBar = this.createProgressBar(progress);
-
-        // Update progress message
-        const estimatedMinutes = Math.ceil(120 / 60); // 2 minutes default for images
-        const updatedText = `
-⏳ Генерация изображения началась!
-Примерное время: ${estimatedMinutes}-${estimatedMinutes + 1} мин
-Текущий статус: ${progressBar} ${progress}%]
-
-🔔 Мы пришлем результат сразу как он будет готов
-        `;
-
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: '🏠 Главное меню', callback_data: 'main' }],
-          ],
-        };
-
-        // Update the progress message
         try {
-          await this.bot.editMessageText(updatedText, {
-            chat_id: chatId,
-            message_id: progressMessageId,
-            reply_markup: keyboard,
-          });
-        } catch (editError) {
-          this.logger.warn('Could not update progress message:', editError);
+          status = await this.klingAiService.getImageStatus(imageId);
+        } catch (statusError) {
+          this.logger.warn(`Could not get image status for ${imageId}, trying direct result fetch:`, statusError);
+          hasStatusMethod = false;
         }
 
-        if (status.status === 'completed' && status.imageUrl) {
-          // Image is ready - send image with caption and buttons
+        // Если есть статус и он завершен
+        if (status && status.status === 'completed' && status.imageUrl) {
           try {
             await this.bot.sendPhoto(chatId, status.imageUrl, {
-              caption: `🎉 Ваше изображение готово!\n\nID: ${imageId}\n💰 Списано: 1 токен`,
+              caption: `🎉 Ваше изображение готово!
+
+ID: ${imageId}
+💰 Списано: 1 токен
+
+Спасибо за использование нашего сервиса!`,
               reply_markup: {
                 inline_keyboard: [
                   [
@@ -1742,12 +1916,26 @@ ID: #${videoId}
                 ],
               },
             });
+
+            // Удаляем прогресс сообщение
+            try {
+              await this.bot.deleteMessage(chatId, progressMessageId);
+            } catch (deleteError) {
+              this.logger.warn('Could not delete progress message:', deleteError);
+            }
+
+            return;
           } catch (imageError) {
-            this.logger.warn('Could not send image directly:', imageError);
-            // Fallback - send text message with download link if image sending fails
+            this.logger.warn('Could not send image directly, sending as text:', imageError);
             await this.bot.sendMessage(
               chatId,
-              `🎉 Ваше изображение готово!\n\nID: ${imageId}\n💰 Списано: 1 токен\n📱 Скачать: ${status.imageUrl}`,
+              `🎉 Ваше изображение готово!
+
+ID: ${imageId}
+💰 Списано: 1 токен
+📱 Скачать: ${status.imageUrl}
+
+Спасибо за использование нашего сервиса!`,
               {
                 reply_markup: {
                   inline_keyboard: [
@@ -1762,10 +1950,19 @@ ID: #${videoId}
                 },
               },
             );
+
+            try {
+              await this.bot.deleteMessage(chatId, progressMessageId);
+            } catch (deleteError) {
+              this.logger.warn('Could not delete progress message:', deleteError);
+            }
+
+            return;
           }
-          return;
-        } else if (status.status === 'failed') {
-          // Generation failed - НЕМЕДЛЕННО уведомляем пользователя!
+        }
+
+        // Если статус показывает ошибку
+        if (status && status.status === 'failed') {
           let failureReason = 'Неизвестная причина';
 
           if (status.errorMessage) {
@@ -1779,11 +1976,11 @@ ID: #${videoId}
             }
           }
 
-          // Сразу отправляем уведомление об ошибке
           await this.bot.sendMessage(
             chatId,
             `❌ Генерация изображения не удалась
 
+ID: ${imageId}
 Причина: ${failureReason}
 
 💡 Советы:
@@ -1801,48 +1998,216 @@ ID: #${videoId}
               },
             },
           );
+
+          try {
+            await this.bot.deleteMessage(chatId, progressMessageId);
+          } catch (deleteError) {
+            this.logger.warn('Could not delete progress message:', deleteError);
+          }
+
           return;
-        } else if (attempts >= maxAttempts) {
-          // Timeout
+        }
+
+        // Обновляем прогресс только если еще не достигли максимума попыток
+        if (attempts < maxAttempts) {
+          const progress = Math.min(95, Math.floor((attempts / maxAttempts) * 100));
+          const progressBar = this.createProgressBar(progress);
+
+          const updatedText = `
+⏳ Генерация изображения...
+ID: ${imageId}
+Примерное время: 1-3 мин
+Текущий статус: ${progressBar} ${progress}%]
+
+🔔 Мы пришлем результат сразу как он будет готов
+          `;
+
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
+            ],
+          };
+
+          try {
+            await this.bot.editMessageText(updatedText, {
+              chat_id: chatId,
+              message_id: progressMessageId,
+              reply_markup: keyboard,
+            });
+          } catch (editError) {
+            this.logger.warn('Could not update progress message:', editError);
+          }
+        }
+
+        // Если достигли максимума попыток - пытаемся получить результат напрямую
+        if (attempts >= maxAttempts) {
+          this.logger.log(`Reached max attempts for ${imageId}, trying to fetch final result...`);
+
+          try {
+            // Пытаемся получить результат напрямую через getImageResult
+            const result = await this.klingAiService.getImageResult(imageId);
+
+            if (result && result.imageUrl) {
+              this.logger.log(`Got final result for ${imageId}: ${result.imageUrl}`);
+              
+              try {
+                await this.bot.sendPhoto(chatId, result.imageUrl, {
+                  caption: `🎉 Ваше изображение готово!
+
+ID: ${imageId}
+💰 Списано: 1 токен
+
+Спасибо за использование нашего сервиса!`,
+                  reply_markup: {
+                    inline_keyboard: [
+                      [
+                        {
+                          text: '🖼 Создать еще изображение',
+                          callback_data: 'image',
+                        },
+                      ],
+                      [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                    ],
+                  },
+                });
+
+                // Удаляем прогресс сообщение
+                try {
+                  await this.bot.deleteMessage(chatId, progressMessageId);
+                } catch (deleteError) {
+                  this.logger.warn('Could not delete progress message:', deleteError);
+                }
+
+                return;
+              } catch (imageError) {
+                this.logger.warn('Could not send final image, sending as text:', imageError);
+                await this.bot.sendMessage(
+                  chatId,
+                  `🎉 Ваше изображение готово!
+
+ID: ${imageId}
+💰 Списано: 1 токен
+📱 Скачать: ${result.imageUrl}
+
+Спасибо за использование нашего сервиса!`,
+                  {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [
+                          {
+                            text: '🖼 Создать еще изображение',
+                            callback_data: 'image',
+                          },
+                        ],
+                        [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                      ],
+                    },
+                  },
+                );
+
+                try {
+                  await this.bot.deleteMessage(chatId, progressMessageId);
+                } catch (deleteError) {
+                  this.logger.warn('Could not delete progress message:', deleteError);
+                }
+
+                return;
+              }
+            } else {
+              this.logger.warn(`No result found for ${imageId} after max attempts`);
+            }
+          } catch (resultError) {
+            this.logger.error(`Could not get final result for ${imageId}:`, resultError);
+          }
+
+          // Если не удалось получить результат - отправляем сообщение о тайм-ауте с командой для проверки
           await this.bot.sendMessage(
             chatId,
-            `⏰ Превышено время ожидания
+            `⏰ Генерация может занять больше времени
 
-Генерация может все еще продолжаться.
-Проверьте результат позже или обратитесь в поддержку.`,
+ID: ${imageId}
+Изображение должно появиться в ближайшее время.
+Используйте команду /getimg ${imageId} для проверки результата.
+
+� Вы можете создать новое изображение, пока ждёте это.`,
             {
               reply_markup: {
                 inline_keyboard: [
+                  [{ text: '🔄 Попробовать снова', callback_data: 'image' }],
                   [{ text: '🏠 Главное меню', callback_data: 'main' }],
                 ],
               },
             },
           );
+
+          try {
+            await this.bot.deleteMessage(chatId, progressMessageId);
+          } catch (deleteError) {
+            this.logger.warn('Could not delete progress message:', deleteError);
+          }
+
           return;
         }
 
-        // Continue polling - быстрее проверяем для ранних ошибок
+        // Продолжаем опрос - быстрее в начале, медленнее потом
         const checkInterval = attempts <= 3 ? 10000 : 30000; // Первые 3 раза каждые 10 сек
         setTimeout(poll, checkInterval);
+
       } catch (error) {
         this.logger.error(`Error polling image status for ${imageId}:`, error);
 
         if (attempts < maxAttempts) {
-          const checkInterval = attempts <= 3 ? 10000 : 30000; // Быстро проверяем на ошибки
+          const checkInterval = attempts <= 3 ? 10000 : 30000;
           setTimeout(poll, checkInterval);
         } else {
           await this.bot.sendMessage(
             chatId,
-            `❌ Ошибка проверки статуса изображения
+            `❌ Ошибка во время генерации
 
-Обратитесь в поддержку для получения результата.`,
+ID: ${imageId}
+Попробуйте проверить результат командой: /getimg ${imageId}
+
+Или создайте новое изображение.`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Попробовать снова', callback_data: 'image' }],
+                  [{ text: '🏠 Главное меню', callback_data: 'main' }],
+                ],
+              },
+            },
           );
+
+          try {
+            await this.bot.deleteMessage(chatId, progressMessageId);
+          } catch (deleteError) {
+            this.logger.warn('Could not delete progress message:', deleteError);
+          }
         }
       }
     };
 
-    // Start polling after initial delay - быстрее начинаем
+    // Начинаем опрос через 10 секунд
     setTimeout(poll, 10000);
+  }
+
+  // Метод для остановки проверки изображения
+  private stopImageCheck(imageId: string) {
+    const check = this.activeImageChecks.get(imageId);
+    if (check) {
+      clearInterval(check.intervalId);
+      this.activeImageChecks.delete(imageId);
+      this.logger.log(`Stopped image check for ${imageId}`);
+    }
+  }
+
+  // Метод для очистки всех активных проверок (при перезапуске)
+  private stopAllImageChecks() {
+    for (const [imageId, check] of this.activeImageChecks.entries()) {
+      clearInterval(check.intervalId);
+    }
+    this.activeImageChecks.clear();
+    this.logger.log('Stopped all active image checks');
   }
 
   private async pollImageGenerationWithoutStatus(
