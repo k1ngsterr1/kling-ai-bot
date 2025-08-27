@@ -699,6 +699,13 @@ ${subscriptionStatus}
 
       // Send Telegram Stars invoice according to official docs
       // https://core.telegram.org/bots/payments-stars
+      const prices = JSON.stringify([
+        {
+          label: packageName,
+          amount: amount, // amount in stars (not cents)
+        },
+      ]);
+
       await (this.bot as any).sendInvoice(
         chatId, // chat_id
         packageName, // title
@@ -707,12 +714,7 @@ ${subscriptionStatus}
         '', // provider_token - empty string for Telegram Stars
         `start_${invoiceId}`, // start_parameter
         'XTR', // currency - always XTR for Telegram Stars
-        [
-          {
-            label: packageName,
-            amount: amount, // amount in stars (not cents)
-          },
-        ], // prices
+        prices, // prices as JSON string
       );
 
       this.logger.log(
