@@ -370,7 +370,6 @@ ${subscriptionStatus}
               callback_data: 'buy_package_4320',
             },
           ],
-          [{ text: '🔹 ПРОФИ (2000₽)', callback_data: 'buy_package_2000' }],
           [
             {
               text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
@@ -4251,12 +4250,12 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
     imageTokens: number;
   } {
     switch (amount) {
-      case 100:
-        return { videoTokens: 1, imageTokens: 3 };
-      case 500:
-        return { videoTokens: 20, imageTokens: 50 };
-      case 1000:
+      case 1200:
+        return { videoTokens: 25, imageTokens: 100 };
+      case 2230:
         return { videoTokens: 50, imageTokens: 100 };
+      case 4320:
+        return { videoTokens: 100, imageTokens: 200 };
       case 2000:
         return { videoTokens: 100, imageTokens: 200 };
       default:
