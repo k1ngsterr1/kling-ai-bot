@@ -697,64 +697,27 @@ ${subscriptionStatus}
         return;
       }
 
-      // For Telegram Stars, we need to use a specific approach
-      // Try using the XTR provider token (empty string should work for Stars)
-      try {
-        await (this.bot as any).sendInvoice(
-          chatId,
-          packageName,
-          payment.description || `Пакет ${packageName}`,
-          `pkg_${invoiceId}`,
-          '', // Empty provider_token for Telegram Stars
-          `start_${invoiceId}`,
-          'XTR', // Telegram Stars currency
-          [
-            {
-              label: packageName,
-              amount: amount,
-            },
-          ],
+      // Send Telegram Stars invoice according to official docs
+      // https://core.telegram.org/bots/payments-stars
+      await (this.bot as any).sendInvoice(
+        chatId, // chat_id
+        packageName, // title
+        payment.description || `Пакет ${packageName}`, // description
+        `pkg_${invoiceId}`, // payload
+        '', // provider_token - empty string for Telegram Stars
+        `start_${invoiceId}`, // start_parameter
+        'XTR', // currency - always XTR for Telegram Stars
+        [
           {
-            // Optional parameters for invoice
-            photo_url: undefined,
-            photo_size: undefined,
-            photo_width: undefined,
-            photo_height: undefined,
-            need_name: false,
-            need_phone_number: false,
-            need_email: false,
-            need_shipping_address: false,
-            send_phone_number_to_provider: false,
-            send_email_to_provider: false,
-            is_flexible: false,
+            label: packageName,
+            amount: amount, // amount in stars (not cents)
           },
-        );
+        ], // prices
+      );
 
-        this.logger.log(
-          `Telegram Stars invoice sent successfully for ${amount} stars`,
-        );
-      } catch (invoiceError) {
-        this.logger.error('Error with sendInvoice:', invoiceError);
-
-        // If invoice fails, fall back to manual payment confirmation
-        await this.bot.sendMessage(
-          chatId,
-          `⭐ Оплата ${amount} звёздами\n\nК сожалению, автоматический инвойс недоступен. Свяжитесь с администратором для ручной обработки платежа.\n\nID платежа: ${invoiceId}`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '📞 Связаться с поддержкой',
-                    callback_data: 'contact_support',
-                  },
-                ],
-                [{ text: '🔙 Назад', callback_data: 'balance' }],
-              ],
-            },
-          },
-        );
-      }
+      this.logger.log(
+        `Telegram Stars invoice sent successfully for ${amount} stars to chat ${chatId}`,
+      );
     } catch (error) {
       this.logger.error('Error sending Telegram Stars invoice:', error);
       await this.bot.sendMessage(
