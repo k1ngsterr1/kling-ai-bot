@@ -140,11 +140,30 @@ export class TelegramBotService {
       this.handleCallbackQuery(callbackQuery);
     });
 
-    // Handle any text message
-    this.bot.on('message', (msg) => {
+    // Handle any message (including successful_payment)
+    this.bot.on('message', async (msg) => {
+      // Handle native Telegram successful payments
+      try {
+        if ((msg as any).successful_payment) {
+          await this.handleSuccessfulPayment(msg);
+          return;
+        }
+      } catch (err) {
+        this.logger.error('Error handling successful payment:', err);
+      }
+
       if (!msg.text?.startsWith('/')) {
         // Handle non-command messages
         this.handleTextMessage(msg);
+      }
+    });
+
+    // Answer pre-checkout queries from Telegram (required for payments)
+    this.bot.on('pre_checkout_query', async (preCheckoutQuery) => {
+      try {
+        await this.bot.answerPreCheckoutQuery(preCheckoutQuery.id, true);
+      } catch (err) {
+        this.logger.error('Error answering pre_checkout_query:', err);
       }
     });
 
@@ -3949,9 +3968,41 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
     3. Неиспользованные токены сгорают при обновлении периода 
       `;
 
+      // If a Telegram Payments provider token is configured, send a native invoice
+      const telegramProviderToken = this.configService.get<string>(
+        'TELEGRAM_PROVIDER_TOKEN',
+      );
+
+      if (telegramProviderToken) {
+        try {
+          const prices = [
+            { label: `${packageName}`, amount: amount * 100 }, // amount in cents
+          ];
+
+          // sendInvoice fields: chatId, title, description, payload, provider_token, start_parameter, currency, prices
+          await (this.bot as any).sendInvoice(
+            chatId,
+            `${packageName}`,
+            description,
+            `pkg_${paymentData.invoiceId}`,
+            telegramProviderToken,
+            `start_${paymentData.invoiceId}`,
+            'RUB',
+            prices,
+          );
+
+          return;
+        } catch (err) {
+          this.logger.warn(
+            'Failed to send Telegram invoice, falling back to web payment',
+            err,
+          );
+        }
+      }
+
       const keyboard = {
         inline_keyboard: [
-          // TG STARS теперь вызывает callback для ручной оплаты звездами (invoiceId)
+          // TG STARS: fallback to manual stars request
           [
             {
               text: `TG STARS ${amount}💫`,
@@ -3983,6 +4034,82 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
         chatId,
         'Произошла ошибка при создании платежа. Попробуйте позже.',
       );
+    }
+  }
+
+  // Handle successful native Telegram payments
+  private async handleSuccessfulPayment(msg: TelegramBot.Message) {
+    try {
+      const pay = (msg as any).successful_payment;
+      if (!pay) return;
+
+      // Payload was set as pkg_<invoiceId>
+      const payload = pay.invoice_payload || '';
+      const invoiceId = payload.startsWith('pkg_')
+        ? payload.replace('pkg_', '')
+        : undefined;
+
+      if (invoiceId) {
+        const payment = await this.prisma.payment.findFirst({
+          where: { invoiceId: invoiceId.toString() },
+        });
+
+        if (payment) {
+          if (payment.status !== 'completed') {
+            await this.prisma.payment.update({
+              where: { id: payment.id },
+              data: { status: 'completed' },
+            });
+
+            const userIdNum = Number(payment.userId);
+            if (!isNaN(userIdNum)) {
+              const v = payment.videoTokensGranted || 0;
+              const i = payment.imageTokensGranted || 0;
+
+              await this.addTokensToUser(userIdNum, v, i);
+
+              // Notify user
+              await this.bot.sendMessage(
+                userIdNum,
+                `✅ Оплата подтверждена. На ваш баланс зачислены токены: 🎬 ${v} / 🖼️ ${i}`,
+              );
+
+              // Notify admins
+              for (const adminId of this.adminIds) {
+                try {
+                  await this.bot.sendMessage(
+                    adminId,
+                    `✅ Платёж ${invoiceId} подтверждён (Telegram). Пользователь: ${userIdNum}`,
+                  );
+                } catch (err) {
+                  this.logger.warn(`Could not notify admin ${adminId}:`, err);
+                }
+              }
+            }
+          }
+        } else {
+          // Fallback: create a payment record if not found
+          await this.prisma.payment.create({
+            data: {
+              invoiceId: invoiceId,
+              userId: msg.from?.id.toString() || 'unknown',
+              amount: Number(pay.total_amount) / 100,
+              packageType: 'tokens',
+              description: pay.title || 'Telegram payment',
+              status: 'completed',
+            },
+          });
+
+          await this.bot.sendMessage(
+            msg.chat.id,
+            '✅ Оплата принята. Спасибо!',
+          );
+        }
+      } else {
+        await this.bot.sendMessage(msg.chat.id, '✅ Оплата принята. Спасибо!');
+      }
+    } catch (error) {
+      this.logger.error('Error handling successful payment message:', error);
     }
   }
 
