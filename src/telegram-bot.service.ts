@@ -3973,7 +3973,10 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
         ],
       };
 
-      await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+      await this.bot.sendMessage(chatId, message, {
+        reply_markup: keyboard,
+        parse_mode: 'HTML',
+      });
     } catch (error) {
       this.logger.error('Error creating payment:', error);
       await this.bot.sendMessage(
