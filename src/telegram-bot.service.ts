@@ -1302,8 +1302,8 @@ ID: ${generationResult.id}
           },
         );
 
-        // Start polling for completion without status check (wait fixed time)
-        this.pollImageGenerationWithoutStatus(
+        // Start polling for completion and send image automatically when ready
+        this.pollImageGeneration(
           chatId,
           generationResult.id,
           progressMessage.message_id,
@@ -1622,6 +1622,60 @@ ID: #${videoId}
     setTimeout(poll, 10000);
   }
 
+  // Helper: fetch a Kling AI image by task id and send to chat
+  private async handleFetchImageCommand(chatId: number, taskId: string) {
+    try {
+      await this.bot.sendMessage(chatId, `🔍 Проверяю задачу: ${taskId} ...`);
+
+      const result = await this.klingAiService.getImageResult(taskId);
+
+      if (!result) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ Результат по задаче ${taskId} не найден или ещё не готов. Попробуйте позже.`,
+        );
+        return;
+      }
+
+      if (result.imageUrl) {
+        // Try to send the photo directly
+        try {
+          await this.bot.sendPhoto(chatId, result.imageUrl, {
+            caption: `🎉 Изображение готово!\n\nID: ${taskId}`,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🖼 Создать еще изображение',
+                    callback_data: 'image',
+                  },
+                ],
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          });
+        } catch (err) {
+          // Fallback: send as message with URL
+          await this.bot.sendMessage(
+            chatId,
+            `🎉 Изображение готово!\n${result.imageUrl}`,
+          );
+        }
+      } else {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ По задаче ${taskId} нет URL изображения.`,
+        );
+      }
+    } catch (error) {
+      this.logger.error('Error in handleFetchImageCommand:', error);
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Ошибка при получении результата. Попробуйте позже.',
+      );
+    }
+  }
+
   private async pollImageGeneration(
     chatId: number,
     imageId: string,
@@ -1675,12 +1729,7 @@ ID: #${videoId}
           // Image is ready - send image with caption and buttons
           try {
             await this.bot.sendPhoto(chatId, status.imageUrl, {
-              caption: `🎉 Ваше изображение готово!
-
-⚠️ ВНИМАНИЕ: Это тестовое изображение, так как API генерации недоступен.
-💰 Списано: 1 токен
-
-Спасибо за использование нашего сервиса!`,
+              caption: `🎉 Ваше изображение готово!\n\nID: ${imageId}\n💰 Списано: 1 токен`,
               reply_markup: {
                 inline_keyboard: [
                   [
@@ -1698,13 +1747,7 @@ ID: #${videoId}
             // Fallback - send text message with download link if image sending fails
             await this.bot.sendMessage(
               chatId,
-              `🎉 Ваше изображение готово!
-
-⚠️ ВНИМАНИЕ: Это тестовое изображение, так как API генерации недоступен.
-💰 Списано: 1 токен
-📱 Скачать: ${status.imageUrl}
-
-Спасибо за использование нашего сервиса!`,
+              `🎉 Ваше изображение готово!\n\nID: ${imageId}\n💰 Списано: 1 токен\n📱 Скачать: ${status.imageUrl}`,
               {
                 reply_markup: {
                   inline_keyboard: [
@@ -1973,6 +2016,22 @@ ID: #${videoId}
     const text = msg.text;
 
     if (!text) return;
+
+    // Quick command: /get_image <taskId> or /getimg <taskId> - fetch image by Kling task id
+    if (text.startsWith('/get_image ') || text.startsWith('/getimg ')) {
+      const parts = text.split(/\s+/);
+      const taskId = parts[1];
+      if (!taskId) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Укажите ID задачи. Пример: /get_image 789627571846647814',
+        );
+        return;
+      }
+
+      this.handleFetchImageCommand(chatId, taskId);
+      return;
+    }
 
     const userState = this.userStates.get(chatId);
 
