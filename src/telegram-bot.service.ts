@@ -3922,12 +3922,19 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       });
 
       const message = `
-✅ ВЫ ВЫБРАЛИ:${packageName}
-💰 Сумма: ${amount} ₽
-🎬 Видео-токены: ${packageDetails.videoTokens}
-📸 Токены изображений: ${packageDetails.imageTokens}
+    ✅ ВЫ ВЫБРАЛИ: **${packageName}**
 
-Нажмите кнопку ниже для перехода к оплате:
+    ▫️ **Срок действия**: 1 месяц  
+    ▫️ **Автопродление**: Да (ежемесячно) 
+
+
+    💰 Сумма: ${amount} ₽
+    🎬 Видео-токены: ${packageDetails.videoTokens}
+    📸 Токены изображений: ${packageDetails.imageTokens}
+
+💳 **СТОИМОСТЬ ПОДПИСКИ**:  
+${amount} ₽/мес  
+
       `;
 
       const keyboard = {
