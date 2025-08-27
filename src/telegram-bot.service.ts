@@ -2526,7 +2526,7 @@ ${selectedPlan.name}
 💳 Тип: Разовая покупка (без подписки)
 💎 Совместимость: Все новые модели Kling для ${type} генерации (V2.0-V2.1)
 
-ЧТО ВЫ МОЖЕТЕ СОЗДАТЬ:
+✨ ЧТО ВЫ МОЖЕТЕ СОЗДАТЬ:
 
 [💎 БАЗОВЫЙ КОНТЕНТ]
 ▶ 50 STANDARD видео (1 токен/5s)
@@ -2555,9 +2555,12 @@ ${selectedPlan.name}
           },
         ],
         [
-          { text: '◀️ Назад к пакетам', callback_data: 'additional_packages' },
-          { text: '🏠 Главное меню', callback_data: 'main' },
+          {
+            text: '💳 Купить пакет',
+            callback_data: `purchase_package_${packageName.replace(' ', '_')}`,
+          },
         ],
+        [{ text: 'Назад', callback_data: 'main' }],
       ],
     };
 
