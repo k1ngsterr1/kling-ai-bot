@@ -697,20 +697,32 @@ ${subscriptionStatus}
         return;
       }
 
-      const prices = [
-        { label: `${packageName}`, amount: amount }, // amount in stars
-      ];
-
       // Send invoice for Telegram Stars payment
+      const invoiceParams = {
+        chat_id: chatId,
+        title: packageName,
+        description: payment.description || `Пакет ${packageName}`,
+        payload: `pkg_${invoiceId}`,
+        provider_token: '', // empty for Telegram Stars
+        start_parameter: `start_${invoiceId}`,
+        currency: 'XTR',
+        prices: [
+          {
+            label: packageName,
+            amount: amount,
+          },
+        ],
+      };
+
       await (this.bot as any).sendInvoice(
-        chatId,
-        `${packageName}`,
-        payment.description || `Пакет ${packageName}`,
-        `pkg_${invoiceId}`,
-        '', // empty provider token for Telegram Stars
-        `start_${invoiceId}`,
-        'XTR', // Telegram Stars currency
-        prices,
+        invoiceParams.chat_id,
+        invoiceParams.title,
+        invoiceParams.description,
+        invoiceParams.payload,
+        invoiceParams.provider_token,
+        invoiceParams.start_parameter,
+        invoiceParams.currency,
+        invoiceParams.prices,
       );
     } catch (error) {
       this.logger.error('Error sending Telegram Stars invoice:', error);
