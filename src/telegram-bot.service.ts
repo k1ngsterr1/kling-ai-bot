@@ -1566,19 +1566,19 @@ ${subscriptionStatus}${subscriptionDetails}
         [{ text: '🔹 СТАРТ (1200₽)', callback_data: 'buy_package_1200' }],
         [
           {
-            text: '� ПРОДВИНУТЫЙ (2230₽)',
+            text: '🔹 ПРОДВИНУТЫЙ (2230₽)',
             callback_data: 'buy_package_2230',
           },
         ],
         [
           {
-            text: '� ПРОФИ (4320₽)',
+            text: '🔹 ПРОФИ (4320₽)',
             callback_data: 'buy_package_4320',
           },
         ],
         [
           {
-            text: '� ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
+            text: '💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ',
             callback_data: 'additional_packages',
           },
         ],
