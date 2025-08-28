@@ -105,6 +105,8 @@ export class PaymentController {
           status: 'pending',
           packageType: `tariff_${request.tariffType}`,
           description: tariff.description,
+          paymentMethod: 'robokassa',
+          subscriptionDuration: 30, // 30 дней для помесячной подписки
           isRecurring: request.recurring || false,
           recurringFrequency: request.recurring ? 'monthly' : null,
           videoTokensGranted: tariff.videoTokens,
@@ -398,15 +400,48 @@ export class PaymentController {
 
       const videoTokens = payment.videoTokensGranted;
       const imageTokens = payment.imageTokensGranted;
+      const subscriptionDuration = payment.subscriptionDuration || 0;
 
       // Убеждаемся, что пользователь существует в базе данных
       await this.ensureUserExists(userId);
 
-      // Обновляем баланс пользователя
-      await this.updateUserBalance(userId, videoTokens, imageTokens);
+      // Определяем дату истечения подписки
+      const now = new Date();
+      const expiresAt =
+        subscriptionDuration > 0
+          ? new Date(now.getTime() + subscriptionDuration * 24 * 60 * 60 * 1000)
+          : null;
 
-      // Обновляем статус платежа в БД
-      await this.updatePaymentStatus(invoiceId, 'completed');
+      // Для Robokassa платежей (помесячные) - обновляем подписку
+      if (payment.paymentMethod === 'robokassa') {
+        await this.prismaService.user.update({
+          where: { telegramId: userId.toString() },
+          data: {
+            videoTokens: { increment: videoTokens },
+            imageTokens: { increment: imageTokens },
+            isSubscribed: true,
+            subscriptionExpiry: expiresAt,
+            subscriptionType: payment.isRecurring
+              ? 'robokassa_monthly_recurring'
+              : 'robokassa_monthly_onetime',
+            lastPaymentMethod: 'robokassa',
+            lastPaymentDate: now,
+          },
+        });
+      } else {
+        // Для других способов оплаты - просто добавляем токены
+        await this.updateUserBalance(userId, videoTokens, imageTokens);
+      }
+
+      // Обновляем статус и дату истечения платежа
+      await this.prismaService.payment.update({
+        where: { invoiceId: invoiceId.toString() },
+        data: {
+          status: 'completed',
+          completedAt: now,
+          expiresAt: expiresAt,
+        },
+      });
 
       // Отправляем уведомление пользователю в Telegram
       await this.notifyUserAboutPayment(
@@ -414,6 +449,8 @@ export class PaymentController {
         amount,
         videoTokens,
         imageTokens,
+        payment.paymentMethod,
+        expiresAt,
       );
     } catch (error) {
       this.logger.error('Error processing successful payment:', error);
@@ -531,17 +568,32 @@ export class PaymentController {
     amount: number,
     videoTokens: number,
     imageTokens: number,
+    paymentMethod?: string,
+    expiresAt?: Date | null,
   ) {
     try {
-      const message = `
+      let message = `
 🎉 Платеж успешно обработан!
 
 💰 Сумма: ${amount} ₽
 🎬 Видео токенов: +${videoTokens}
-🖼 Токенов изображений: +${imageTokens}
+🖼 Токенов изображений: +${imageTokens}`;
 
-Токены зачислены на ваш баланс. Теперь вы можете создавать контент!
-      `;
+      if (paymentMethod === 'robokassa' && expiresAt) {
+        const expiryDate = expiresAt.toLocaleDateString('ru-RU');
+        message += `
+
+📅 Подписка активна до: ${expiryDate}
+🔄 Автоматическое продление: ${paymentMethod === 'robokassa' ? 'Да' : 'Нет'}`;
+      } else {
+        message += `
+
+💫 Токены добавлены на ваш баланс навсегда!`;
+      }
+
+      message += `
+
+Теперь вы можете создавать контент!`;
 
       await this.telegramBotService.sendMessage(userId, message);
     } catch (error) {

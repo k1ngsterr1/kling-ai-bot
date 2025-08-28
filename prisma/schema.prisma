@@ -26,6 +26,9 @@ model User {
   // Subscription info
   isSubscribed Boolean  @default(false)
   subscriptionExpiry DateTime?
+  subscriptionType String? // "robokassa_monthly", "telegram_stars_onetime"
+  lastPaymentMethod String? // "robokassa", "telegram_stars"
+  lastPaymentDate DateTime?
   
   // Token balances
   videoTokens Int @default(0)
@@ -97,6 +100,11 @@ model Payment {
   packageType String   // video_tokens, image_tokens, premium_subscription, subscription
   description String
   status      String   @default("pending") // pending, completed, failed, cancelled
+  
+  // Тип платежа и способ оплаты
+  paymentMethod String @default("robokassa") // "robokassa", "telegram_stars"
+  subscriptionDuration Int? // Длительность в днях (30 для месячной подписки через Robokassa)
+  expiresAt DateTime? // Когда истекает действие этого платежа
   
   // Рекуррентные платежи
   isRecurring Boolean  @default(false)

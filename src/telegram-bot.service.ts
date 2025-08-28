@@ -368,8 +368,13 @@ export class TelegramBotService {
       const imageTokens = user?.imageTokens || 0;
       const isSubscribed = user?.isSubscribed || false;
       const subscriptionExpiry = user?.subscriptionExpiry;
+      const subscriptionType = user?.subscriptionType;
+      const lastPaymentMethod = user?.lastPaymentMethod;
+      const lastPaymentDate = user?.lastPaymentDate;
 
       let subscriptionStatus = '⚠️ Подписка не активна';
+      let subscriptionDetails = '';
+
       if (
         isSubscribed &&
         subscriptionExpiry &&
@@ -377,6 +382,36 @@ export class TelegramBotService {
       ) {
         const expiryDate = subscriptionExpiry.toLocaleDateString('ru-RU');
         subscriptionStatus = `✅ Подписка активна до ${expiryDate}`;
+
+        if (subscriptionType) {
+          subscriptionDetails = `\n🔄 Тип: ${subscriptionType}`;
+        }
+
+        if (lastPaymentMethod) {
+          subscriptionDetails += `\n💳 Способ: ${lastPaymentMethod === 'robokassa' ? 'Банковская карта (Robokassa)' : 'Telegram Stars'}`;
+        }
+
+        if (lastPaymentDate) {
+          const paymentDate = lastPaymentDate.toLocaleDateString('ru-RU');
+          subscriptionDetails += `\n📅 Последний платеж: ${paymentDate}`;
+        }
+
+        // Показываем информацию о возобновлении
+        if (lastPaymentMethod === 'robokassa') {
+          subscriptionDetails +=
+            '\n\n🔄 Подписка продлевается автоматически каждый месяц через Robokassa';
+        } else {
+          subscriptionDetails +=
+            '\n\n💫 Токены получены через Telegram Stars (единоразово)';
+        }
+      } else if (subscriptionExpiry && subscriptionExpiry <= new Date()) {
+        const expiredDate = subscriptionExpiry.toLocaleDateString('ru-RU');
+        subscriptionStatus = `⏰ Подписка истекла ${expiredDate}`;
+
+        if (lastPaymentMethod === 'robokassa') {
+          subscriptionDetails =
+            '\n\n💡 Для возобновления подписки используйте /buy';
+        }
       }
 
       const balanceText = `
@@ -385,7 +420,7 @@ export class TelegramBotService {
 🎬 Видео-токены: ${videoTokens}
 📸 Токены изображений: ${imageTokens}
 
-${subscriptionStatus}
+${subscriptionStatus}${subscriptionDetails}
 
 🔥 ВЫГОДНЫЕ ПОДПИСКИ (ежемесячное автопополнение)
 
@@ -1284,7 +1319,7 @@ ${subscriptionStatus}
   }
 
   /**
-   * Проверяет баланс пользователя перед генерацией
+   * Проверяет баланс пользователя и активность подписки перед генерацией
    */
   private async checkUserBalance(
     userId: number,
@@ -1309,20 +1344,68 @@ ${subscriptionStatus}
         };
       }
 
-      const currentBalance =
+      // Проверяем подписку (если есть)
+      const now = new Date();
+      const hasActiveSubscription =
+        user.isSubscribed &&
+        user.subscriptionExpiry &&
+        user.subscriptionExpiry > now;
+
+      let currentBalance =
         tokenType === 'video' ? user.videoTokens : user.imageTokens;
 
-      if (currentBalance < requiredTokens) {
-        const tokenName = tokenType === 'video' ? 'видео' : 'изображений';
+      // Если подписка истекла, уведомляем пользователя
+      if (
+        user.isSubscribed &&
+        user.subscriptionExpiry &&
+        user.subscriptionExpiry <= now
+      ) {
+        // Подписка истекла - деактивируем
+        await this.prisma.user.update({
+          where: { telegramId: userId.toString() },
+          data: {
+            isSubscribed: false,
+            subscriptionType: null,
+          },
+        });
+
+        const expiredDate = user.subscriptionExpiry.toLocaleDateString('ru-RU');
         return {
           hasBalance: false,
           currentBalance,
-          message: `❌ Недостаточно токенов для генерации!
+          message: `⏰ Ваша подписка истекла ${expiredDate}
+
+💰 Текущий баланс: ${currentBalance} токенов для ${tokenType === 'video' ? 'видео' : 'изображений'}
+🔄 Требуется: ${requiredTokens} токенов
+
+Для продления подписки или покупки токенов используйте /buy`,
+        };
+      }
+
+      if (currentBalance < requiredTokens) {
+        const tokenName = tokenType === 'video' ? 'видео' : 'изображений';
+        let message = `❌ Недостаточно токенов для генерации!
 
 💰 Требуется: ${requiredTokens} токенов для ${tokenName}
-🏦 У вас: ${currentBalance} токенов
+🏦 У вас: ${currentBalance} токенов`;
 
-Для покупки токенов используйте /buy`,
+        if (hasActiveSubscription) {
+          const expiryDate =
+            user.subscriptionExpiry!.toLocaleDateString('ru-RU');
+          message += `
+
+📅 Активная подписка до: ${expiryDate}
+🔄 Тип: ${user.subscriptionType}`;
+        }
+
+        message += `
+
+Для покупки токенов используйте /buy`;
+
+        return {
+          hasBalance: false,
+          currentBalance,
+          message,
         };
       }
 
@@ -1697,7 +1780,47 @@ ID: ${generationResult.id}
       aspectRatio,
     } = userState.data;
 
+    // Рассчитываем стоимость генерации
+    const totalCost = duration === 5 ? 4 : 8;
+
+    // Проверяем баланс пользователя перед генерацией
+    const balanceCheck = await this.checkUserBalance(
+      chatId,
+      totalCost,
+      'video',
+    );
+
+    if (!balanceCheck.hasBalance) {
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: '💰 Купить токены', callback_data: 'buy_tokens' }],
+          [{ text: '🏠 Главное меню', callback_data: 'main' }],
+        ],
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        balanceCheck.message || 'Недостаточно токенов',
+        { reply_markup: keyboard },
+      );
+      return;
+    }
+
     try {
+      // Списываем токены перед генерацией
+      const tokensDeducted = await this.deductTokens(
+        chatId,
+        totalCost,
+        'video',
+      );
+      if (!tokensDeducted) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Ошибка списания токенов. Попробуйте позже.',
+        );
+        return;
+      }
+
       // Create Kling AI request
       const klingRequest: KlingVideoRequest = {
         prompt,
@@ -1711,7 +1834,6 @@ ID: ${generationResult.id}
       const generationResult =
         await this.klingAiService.generateVideo(klingRequest);
 
-      const totalCost = duration === 5 ? 4 : 8;
       const estimatedMinutes = Math.ceil(
         (generationResult.estimatedTime || 180) / 60,
       );
@@ -1721,6 +1843,10 @@ ID: ${generationResult.id}
 ⏳ Генерация начата!
 ID: #${generationResult.id}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
+
+💰 Списано: ${totalCost} токенов
+🏦 Остаток: ${balanceCheck.currentBalance - totalCost} токенов
+
 Текущий статус: [██████▒▒▒▒▒▒▒▒▒ 20%]
 
 🔔 Результат придет автоматически
@@ -1752,11 +1878,17 @@ ID: #${generationResult.id}
     } catch (error) {
       this.logger.error('Error starting video generation:', error);
 
+      // Возвращаем токены если генерация не запустилась
+      await this.prisma.user.update({
+        where: { telegramId: chatId.toString() },
+        data: { videoTokens: { increment: totalCost } },
+      });
+
       // Check if error is related to API keys
       if (error.message?.includes('API keys not configured')) {
         this.bot.sendMessage(
           chatId,
-          '❌ API ключи Kling AI не настроены!\n\nОбратитесь к администратору для настройки ключей через /admin',
+          '❌ API ключи Kling AI не настроены!\n\nТокены возвращены на ваш баланс.\n\nОбратитесь к администратору для настройки ключей через /admin',
           {
             reply_markup: {
               inline_keyboard: [
@@ -1768,7 +1900,7 @@ ID: #${generationResult.id}
       } else {
         this.bot.sendMessage(
           chatId,
-          '❌ Ошибка при запуске генерации. Попробуйте еще раз.',
+          `❌ Ошибка при запуске генерации. Токены (${totalCost}) возвращены на ваш баланс. Попробуйте еще раз.`,
           {
             reply_markup: {
               inline_keyboard: [
@@ -3535,7 +3667,7 @@ ${selectedPlan.recurring ? '• Автопродление каждый меся
       // Создаем описание для платежа
       const description = `${packageName} - ${packageDetails.videoTokens} видео-токенов + ${packageDetails.imageTokens} токенов изображений`;
 
-      // Создаем запись в базе данных для отслеживания
+      // Создаем запись в базе данных для отслеживания (Stars = разовая покупка)
       const payment = await this.prisma.payment.create({
         data: {
           invoiceId: Date.now().toString(),
@@ -3544,6 +3676,8 @@ ${selectedPlan.recurring ? '• Автопродление каждый меся
           packageType: 'tokens',
           description: description,
           status: 'pending',
+          paymentMethod: 'telegram_stars', // Telegram Stars - разовая покупка
+          subscriptionDuration: null, // Нет срока действия для Stars
           videoTokensGranted: packageDetails.videoTokens,
           imageTokensGranted: packageDetails.imageTokens,
         },
@@ -5254,7 +5388,10 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
           if (payment.status !== 'completed') {
             await this.prisma.payment.update({
               where: { id: payment.id },
-              data: { status: 'completed' },
+              data: {
+                status: 'completed',
+                completedAt: new Date(),
+              },
             });
 
             this.logger.log(
@@ -5270,12 +5407,28 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
                 `[STARS PAYMENT] Granting tokens to user ${userIdNum}: ${v} video, ${i} image`,
               );
 
-              await this.addTokensToUser(userIdNum, v, i);
+              // Для Telegram Stars (разовая покупка) - просто добавляем токены без подписки
+              await this.prisma.user.update({
+                where: { telegramId: userIdNum.toString() },
+                data: {
+                  videoTokens: { increment: v },
+                  imageTokens: { increment: i },
+                  lastPaymentMethod: 'telegram_stars',
+                  lastPaymentDate: new Date(),
+                },
+              });
 
               // Notify user
               await this.bot.sendMessage(
                 userIdNum,
-                `✅ Оплата подтверждена. На ваш баланс зачислены токены: 🎬 ${v} / 🖼️ ${i}`,
+                `✅ Оплата звездами подтверждена!
+
+💫 На ваш баланс зачислены токены:
+🎬 Видео: +${v}
+🖼 Изображения: +${i}
+
+💎 Токены добавлены навсегда и не имеют срока действия!
+Приятного использования!`,
               );
 
               this.logger.log(
