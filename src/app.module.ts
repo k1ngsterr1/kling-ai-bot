@@ -13,6 +13,8 @@ import { PaymentController } from './payment.controller';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ['.env', '.env.local', '.env.production'],
+      ignoreEnvFile: false,
     }),
   ],
   controllers: [AppController, TelegramController, PaymentController],

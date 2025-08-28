@@ -73,8 +73,27 @@ export class TelegramBotService {
     private prisma: PrismaService,
     private robokassaService: RobokassaService,
   ) {
+    console.log('🔍 Debug: Checking environment variables...');
+    console.log('🔍 NODE_ENV:', process.env.NODE_ENV);
+    console.log('🔍 Current working directory:', process.cwd());
+    console.log(
+      '🔍 TELEGRAM_BOT_TOKEN from process.env:',
+      process.env.TELEGRAM_BOT_TOKEN ? 'EXISTS' : 'MISSING',
+    );
+    console.log(
+      '🔍 All env vars:',
+      Object.keys(process.env).filter((key) => key.includes('TELEGRAM')),
+    );
+
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    console.log('🔍 Token from ConfigService:', token ? 'EXISTS' : 'MISSING');
+
     if (!token) {
+      console.error('❌ TELEGRAM_BOT_TOKEN is not defined in ConfigService');
+      console.error(
+        '❌ Process env keys containing TELEGRAM:',
+        Object.keys(process.env).filter((key) => key.includes('TELEGRAM')),
+      );
       throw new Error('TELEGRAM_BOT_TOKEN is not defined');
     }
 
