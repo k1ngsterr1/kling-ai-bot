@@ -801,7 +801,7 @@ ${subscriptionStatus}${subscriptionDetails}
         this.handleImageAspectRatioChoice(chatId, '16:9');
         break;
       case 'buy_package_1200':
-        this.handleBuyPackage(chatId, 1200, 'Пакет СТАРТ');
+        this.handleBuyPackage(chatId, 5, 'Пакет СТАРТ');
         break;
       case 'buy_package_2230':
         this.handleBuyPackage(chatId, 2230, 'Пакет ПРОДВИНУТЫЙ');
