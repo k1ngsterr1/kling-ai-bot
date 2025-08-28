@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as crypto from 'crypto-js';
 
 export interface RobokassaPaymentRequest {
   userId: number;
@@ -8,6 +7,8 @@ export interface RobokassaPaymentRequest {
   description: string;
   email?: string;
   currency?: string;
+  recurring?: boolean; // Для рекуррентных платежей
+  recurringFrequency?: 'monthly' | 'weekly' | 'daily'; // Частота списания
 }
 
 export interface RobokassaPaymentUrl {
@@ -19,7 +20,21 @@ export interface RobokassaCallbackData {
   OutSum: string;
   InvId: string;
   SignatureValue: string;
-  [key: string]: string;
+  Fee?: string; // Комиссия
+  EMail?: string; // Email плательщика
+  PaymentMethod?: string; // Способ оплаты
+  IncSum?: string; // Сумма к получению
+  IncCurrLabel?: string; // Валюта к получению
+  PreviousInvoiceID?: string; // Для рекуррентных платежей
+  Recurring?: string; // Флаг рекуррентного платежа
+  [key: string]: string | undefined;
+}
+
+export interface RecurringPaymentData {
+  previousInvoiceId: string;
+  amount: number;
+  description: string;
+  userId: number;
 }
 
 @Injectable()
@@ -45,8 +60,8 @@ export class RobokassaService {
     this.password2 =
       this.configService.get<string>('ROBOKASSA_PASSWORD2') ||
       'EJ8rKq4mtHbr65eP4LWV';
-    this.testMode =
-      this.configService.get<string>('ROBOKASSA_TEST_MODE') === 'true';
+    this.testMode = false; // Отключаем тестовый режим для боевых паролей
+    // this.configService.get<string>('ROBOKASSA_TEST_MODE') === 'true';
 
     this.logger.log('🏦 Robokassa service initialized');
     this.logger.log(`Merchant: ${this.merchantLogin}`);
@@ -71,36 +86,57 @@ export class RobokassaService {
       amount,
       invoiceId.toString(),
       request.userId,
+      request.recurring,
     );
 
     // Параметры для URL
     const params = new URLSearchParams({
       MerchantLogin: this.merchantLogin,
-      OutSum: amount,
+      OutSum: amount.toString(),
       InvoiceID: invoiceId.toString(),
-      Description: request.description,
-      SignatureValue: signature,
-      Culture: 'ru',
-      Encoding: 'utf-8',
+      Description: `Покупка ${amount} токенов`,
+      SignatureValue: signature, // Используем SignatureValue
+      // Временно убираем Shp_userId для отладки ошибки 29
+      // Shp_userId: request.userId?.toString() || '',
+      Culture: 'ru', // Локализация
     });
 
-    // Добавляем дополнительные параметры если есть
-    if (request.email) {
-      params.append('Email', request.email);
+    // Убираем пустые параметры
+    const filteredParams = new URLSearchParams();
+    for (const [key, value] of params.entries()) {
+      if (value && value.trim() !== '') {
+        filteredParams.append(key, value);
+      }
     }
 
-    if (request.currency && request.currency !== 'RUB') {
-      params.append('OutSumCurrency', request.currency);
-    }
-
-    // Добавляем пользовательские данные
-    params.append('Shp_UserId', request.userId.toString());
+    // Поддержка рекуррентных платежей (временно отключено для отладки)
+    // if (request.recurring) {
+    //   params.append('Recurring', 'true');
+    //
+    //   // Устанавливаем частоту списания
+    //   if (request.recurringFrequency) {
+    //     switch (request.recurringFrequency) {
+    //       case 'monthly':
+    //         params.append('ExpirationDate', this.getExpirationDate(30)); // 30 дней
+    //         break;
+    //       case 'weekly':
+    //         params.append('ExpirationDate', this.getExpirationDate(7)); // 7 дней
+    //         break;
+    //       case 'daily':
+    //         params.append('ExpirationDate', this.getExpirationDate(1)); // 1 день
+    //         break;
+    //     }
+    //   } else {
+    //     // По умолчанию месячная подписка
+    //     params.append('ExpirationDate', this.getExpirationDate(30));
+    //   }
+    // }
 
     if (this.testMode) {
-      params.append('IsTest', '1');
+      filteredParams.append('IsTest', '1');
     }
 
-    const fullPaymentUrl = `${this.paymentUrl}?${params.toString()}`;
+    const fullPaymentUrl = `${this.paymentUrl}?${filteredParams.toString()}`;
 
     this.logger.log(`Payment URL created for invoice ${invoiceId}`);
     this.logger.debug(`Payment URL: ${fullPaymentUrl}`);
@@ -115,16 +151,36 @@ export class RobokassaService {
    * Проверяет подпись callback'а от Robokassa
    */
   verifyCallback(data: RobokassaCallbackData): boolean {
-    const { OutSum, InvId, SignatureValue, ...customParams } = data;
+    const {
+      OutSum,
+      InvId,
+      SignatureValue,
+      Fee,
+      EMail,
+      PaymentMethod,
+      IncSum,
+      IncCurrLabel,
+      PreviousInvoiceID,
+      Recurring,
+      ...customParams
+    } = data;
 
     this.logger.log(
-      `Verifying callback for invoice ${InvId}, amount: ${OutSum}`,
+      `Verifying callback for invoice ${InvId}, amount: ${OutSum}${PreviousInvoiceID ? ` (recurring from ${PreviousInvoiceID})` : ''}`,
     );
+
+    // Фильтруем только строковые значения для customParams
+    const filteredCustomParams: Record<string, string> = {};
+    Object.entries(customParams).forEach(([key, value]) => {
+      if (typeof value === 'string') {
+        filteredCustomParams[key] = value;
+      }
+    });
 
     const expectedSignature = this.generateCallbackSignature(
       OutSum,
       InvId,
-      customParams,
+      filteredCustomParams,
     );
     const receivedSignature = SignatureValue.toLowerCase();
     const expectedSignatureLower = expectedSignature.toLowerCase();
@@ -149,27 +205,31 @@ export class RobokassaService {
     amount: string,
     invoiceId: string,
     userId?: number,
+    isRecurring?: boolean,
   ): string {
-    // Формат: MerchantLogin:OutSum:InvoiceID:Password1[:Shp_параметры в алфавитном порядке]
+    // Простая формула без дополнительных параметров: MerchantLogin:OutSum:InvoiceID:Password1
     let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}:${this.password1}`;
 
-    // Добавляем Shp_ параметры в алфавитном порядке
-    if (userId) {
-      signatureString += `:Shp_UserId=${userId}`;
-    }
+    // Временно убираем Shp параметры для отладки ошибки 29
+    // if (userId) {
+    //   signatureString += `:Shp_userId=${userId}`;
+    // }
 
     this.logger.debug(
       `Payment signature string: ${signatureString.replace(this.password1, '***')}`,
     );
 
-    const signature = crypto.MD5(signatureString).toString().toUpperCase();
+    // Используем нативный crypto модуль
+    const signature = require('crypto')
+      .createHash('md5')
+      .update(signatureString)
+      .digest('hex')
+      .toUpperCase();
 
     this.logger.debug(`Payment signature: ${signature}`);
 
     return signature;
-  }
-
-  /**
+  } /**
    * Генерирует подпись для проверки callback'а
    */
   private generateCallbackSignature(
@@ -197,7 +257,11 @@ export class RobokassaService {
       `Callback signature string: ${signatureString.replace(this.password2, '***')}`,
     );
 
-    const signature = crypto.MD5(signatureString).toString().toUpperCase();
+    const signature = require('crypto')
+      .createHash('md5')
+      .update(signatureString)
+      .digest('hex')
+      .toUpperCase();
 
     this.logger.debug(`Callback signature: ${signature}`);
 
@@ -208,7 +272,13 @@ export class RobokassaService {
    * Извлекает данные пользователя из callback'а
    */
   extractUserDataFromCallback(data: RobokassaCallbackData): { userId: number } {
-    const userId = parseInt(data.Shp_UserId);
+    const userIdStr = data.Shp_UserId;
+
+    if (!userIdStr) {
+      throw new Error('Missing user ID in callback data');
+    }
+
+    const userId = parseInt(userIdStr);
 
     if (isNaN(userId)) {
       throw new Error('Invalid user ID in callback data');
@@ -226,5 +296,134 @@ export class RobokassaService {
     } else {
       return `ERROR: ${message || 'Payment processing failed'}`;
     }
+  }
+
+  /**
+   * Получает дату истечения для рекуррентного платежа
+   */
+  private getExpirationDate(days: number): string {
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + days);
+
+    // Формат: YYYY-MM-DDThh:mm:ss
+    const year = expirationDate.getFullYear();
+    const month = String(expirationDate.getMonth() + 1).padStart(2, '0');
+    const day = String(expirationDate.getDate()).padStart(2, '0');
+    const hours = String(expirationDate.getHours()).padStart(2, '0');
+    const minutes = String(expirationDate.getMinutes()).padStart(2, '0');
+    const seconds = String(expirationDate.getSeconds()).padStart(2, '0');
+
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  }
+
+  /**
+   * Создает рекуррентный платеж на основе предыдущего
+   */
+  async createRecurringPayment(
+    data: RecurringPaymentData,
+  ): Promise<RobokassaPaymentUrl> {
+    const invoiceId = Date.now();
+    const amount = data.amount.toFixed(2);
+
+    this.logger.log(
+      `Creating recurring payment for user ${data.userId}, amount: ${amount} RUB, based on invoice ${data.previousInvoiceId}`,
+    );
+
+    // Формируем подпись для рекуррентного платежа
+    const signature = this.generateRecurringSignature(
+      amount,
+      invoiceId.toString(),
+      data.previousInvoiceId,
+      data.userId,
+    );
+
+    // Параметры для рекуррентного платежа
+    const params = new URLSearchParams({
+      MerchantLogin: this.merchantLogin,
+      OutSum: amount,
+      InvoiceID: invoiceId.toString(),
+      Description: data.description,
+      SignatureValue: signature,
+      PreviousInvoiceID: data.previousInvoiceId,
+      Recurring: 'true',
+      Culture: 'ru',
+      Encoding: 'utf-8',
+    });
+
+    // Добавляем пользовательские данные
+    params.append('Shp_UserId', data.userId.toString());
+
+    if (this.testMode) {
+      params.append('IsTest', '1');
+    }
+
+    const fullPaymentUrl = `${this.paymentUrl}?${params.toString()}`;
+
+    this.logger.log(`Recurring payment URL created for invoice ${invoiceId}`);
+
+    return {
+      paymentUrl: fullPaymentUrl,
+      invoiceId: invoiceId,
+    };
+  }
+
+  /**
+   * Генерирует подпись для рекуррентного платежа
+   */
+  private generateRecurringSignature(
+    amount: string,
+    invoiceId: string,
+    previousInvoiceId: string,
+    userId?: number,
+  ): string {
+    // Формат для рекуррентного платежа: MerchantLogin:OutSum:InvoiceID:PreviousInvoiceID:Password1[:Shp_параметры]
+    let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}:${previousInvoiceId}:${this.password1}`;
+
+    // Собираем все Shp_ параметры
+    const shpParams: string[] = [];
+
+    if (userId) {
+      shpParams.push(`Shp_UserId=${userId}`);
+    }
+
+    // Добавляем параметры в алфавитном порядке
+    if (shpParams.length > 0) {
+      shpParams.sort(); // Сортируем по алфавиту
+      signatureString += `:${shpParams.join(':')}`;
+    }
+
+    this.logger.debug(
+      `Recurring signature string: ${signatureString.replace(this.password1, '***')}`,
+    );
+
+    const signature = require('crypto')
+      .createHash('md5')
+      .update(signatureString)
+      .digest('hex')
+      .toUpperCase();
+
+    this.logger.debug(`Recurring signature: ${signature}`);
+
+    return signature;
+  }
+
+  /**
+   * Проверяет, является ли платеж рекуррентным
+   */
+  isRecurringPayment(data: RobokassaCallbackData): boolean {
+    return !!(data.PreviousInvoiceID || data.Recurring);
+  }
+
+  /**
+   * Отменяет рекуррентный платеж
+   */
+  async cancelRecurringPayment(invoiceId: string): Promise<boolean> {
+    this.logger.log(`Cancelling recurring payment for invoice ${invoiceId}`);
+
+    // В реальной реализации здесь должен быть API-вызов к Robokassa для отмены подписки
+    // Пока что просто логируем
+    this.logger.log(`Recurring payment ${invoiceId} marked for cancellation`);
+
+    return true;
   }
 }

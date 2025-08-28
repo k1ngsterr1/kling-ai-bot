@@ -94,9 +94,15 @@ model Payment {
   userId      String   // Telegram user ID
   amount      Decimal  @db.Decimal(10,2)
   currency    String   @default("RUB")
-  packageType String   // video_tokens, image_tokens, premium_subscription
+  packageType String   // video_tokens, image_tokens, premium_subscription, subscription
   description String
   status      String   @default("pending") // pending, completed, failed, cancelled
+  
+  // Рекуррентные платежи
+  isRecurring Boolean  @default(false)
+  recurringFrequency String? // monthly, weekly, daily
+  previousInvoiceId String? // Для рекуррентных платежей
+  nextBillingDate DateTime? // Дата следующего списания
   
   // Robokassa specific fields
   robokassaData Json?   // Store additional Robokassa callback data

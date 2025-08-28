@@ -762,6 +762,26 @@ ${subscriptionStatus}
       case 'buy_package_4320':
         this.handleBuyPackage(chatId, 4320, 'Пакет ПРОФИ');
         break;
+      case 'purchase_start':
+        this.handleSubscriptionPurchase(
+          chatId,
+          'start',
+          callbackQuery.from?.id,
+        );
+        break;
+      case 'purchase_advanced':
+        this.handleSubscriptionPurchase(
+          chatId,
+          'advanced',
+          callbackQuery.from?.id,
+        );
+        break;
+      case 'purchase_pro':
+        this.handleSubscriptionPurchase(chatId, 'pro', callbackQuery.from?.id);
+        break;
+      case 'confirm_cancel_subscription':
+        this.handleConfirmCancelSubscription(chatId, callbackQuery.from?.id);
+        break;
       default:
         this.bot.sendMessage(chatId, 'Неизвестная команда');
     }
@@ -2896,6 +2916,113 @@ ${selectedPlan.name}
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
   }
 
+  private async handleSubscriptionPurchase(
+    chatId: number,
+    plan: 'start' | 'advanced' | 'pro',
+    userId?: number,
+  ) {
+    try {
+      const plans = {
+        start: {
+          name: '💎 СТАРТ',
+          videos: 25,
+          images: 100,
+          price: 1200,
+          recurring: false, // Стартовый план - разовый платеж
+        },
+        advanced: {
+          name: '💎 ПРОДВИНУТЫЙ',
+          videos: 50,
+          images: 100,
+          price: 2230,
+          recurring: true, // Продвинутый план - подписка
+        },
+        pro: {
+          name: '💎 ПРОФИ',
+          videos: 100,
+          images: 200,
+          price: 4320,
+          recurring: true, // Профи план - подписка
+        },
+      };
+
+      const selectedPlan = plans[plan];
+
+      // Убеждаемся, что пользователь существует в базе данных
+      await this.ensureUserExists(chatId);
+
+      const description = `Подписка ${selectedPlan.name} - ${selectedPlan.videos} видео + ${selectedPlan.images} изображений`;
+
+      // Создаем URL для оплаты через Robokassa
+      const paymentData = await this.robokassaService.createPaymentUrl({
+        userId: chatId,
+        amount: selectedPlan.price,
+        description: description,
+        recurring: selectedPlan.recurring,
+        recurringFrequency: 'monthly', // Месячная подписка
+      });
+
+      // Сохраняем информацию о платеже в базе данных
+      await this.prisma.payment.create({
+        data: {
+          invoiceId: paymentData.invoiceId.toString(),
+          userId: chatId.toString(),
+          amount: selectedPlan.price,
+          packageType: selectedPlan.recurring ? 'subscription' : 'tokens',
+          description: description,
+          status: 'pending',
+          videoTokensGranted: selectedPlan.videos,
+          imageTokensGranted: selectedPlan.images,
+        },
+      });
+
+      const text = `
+✅ ВЫ ВЫБРАЛИ: ${selectedPlan.name}
+
+📦 Включает:
+• ${selectedPlan.videos} видео токенов  
+• ${selectedPlan.images} токенов изображений
+${selectedPlan.recurring ? '• Автопродление каждый месяц' : '• Разовый платеж'}
+
+💰 Стоимость: ${selectedPlan.price}₽${selectedPlan.recurring ? '/мес' : ''}
+
+Нажмите кнопку для перехода к оплате:
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: `💳 ОПЛАТИТЬ ${selectedPlan.price}₽`,
+              url: paymentData.paymentUrl,
+            },
+          ],
+          [
+            {
+              text: '📄 Оферта',
+              url: 'https://teletype.in/@help_24/oferta_kling',
+            },
+          ],
+          [
+            { text: '🔙 Назад к тарифам', callback_data: 'balance' },
+            { text: '🏠 Главное меню', callback_data: 'main' },
+          ],
+        ],
+      };
+
+      await this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    } catch (error) {
+      this.logger.error(
+        `Error in handleSubscriptionPurchase for plan ${plan}:`,
+        error,
+      );
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка при создании платежа. Попробуйте позже.',
+      );
+    }
+  }
+
   private handleAdditionalPackages(chatId: number) {
     const text = `
 💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ
@@ -2967,6 +3094,102 @@ ${selectedPlan.name}
     };
 
     this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  }
+
+  private async handleConfirmCancelSubscription(
+    chatId: number,
+    userId?: number,
+  ) {
+    try {
+      // Находим активные подписки пользователя
+      const activePayments = await this.prisma.payment.findMany({
+        where: {
+          userId: chatId.toString(),
+          packageType: 'subscription',
+          status: 'completed',
+        },
+        orderBy: {
+          completedAt: 'desc',
+        },
+        take: 1, // Берем последнюю активную подписку
+      });
+
+      if (activePayments.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ У вас нет активных подписок для отмены.',
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
+        );
+        return;
+      }
+
+      const lastPayment = activePayments[0];
+
+      // Отменяем рекуррентный платеж через Robokassa
+      const cancelled = await this.robokassaService.cancelRecurringPayment(
+        lastPayment.invoiceId,
+      );
+
+      if (cancelled) {
+        // Обновляем статус в базе данных
+        await this.prisma.payment.update({
+          where: { id: lastPayment.id },
+          data: { status: 'cancelled' },
+        });
+
+        await this.bot.sendMessage(
+          chatId,
+          `✅ Подписка отменена
+
+Ваша подписка успешно отменена. Автопродление остановлено.
+
+• Неиспользованные токены остаются на балансе
+• Доступ к функциям сохраняется до конца оплаченного периода
+• Вы можете оформить новую подписку в любой момент
+
+Спасибо за использование нашего сервиса!`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💰 Пополнить баланс', callback_data: 'balance' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
+        );
+      } else {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ Произошла ошибка при отмене подписки. Попробуйте позже или обратитесь в поддержку.',
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🏠 Главное меню', callback_data: 'main' }],
+              ],
+            },
+          },
+        );
+      }
+    } catch (error) {
+      this.logger.error('Error cancelling subscription:', error);
+      await this.bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка при отмене подписки. Попробуйте позже.',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
+            ],
+          },
+        },
+      );
+    }
   }
 
   private handlePackagePurchase(

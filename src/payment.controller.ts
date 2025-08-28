@@ -20,6 +20,15 @@ export interface PaymentRequest {
   packageType: 'video_tokens' | 'image_tokens' | 'premium_subscription';
   description: string;
   email?: string;
+  recurring?: boolean; // Для рекуррентных платежей
+  recurringFrequency?: 'monthly' | 'weekly' | 'daily'; // Частота списания
+}
+
+export interface RecurringPaymentRequest {
+  userId: number;
+  amount: number;
+  description: string;
+  previousInvoiceId: string;
 }
 
 @Controller('payment')
@@ -45,6 +54,8 @@ export class PaymentController {
         amount: request.amount,
         description: request.description,
         email: request.email,
+        recurring: request.recurring,
+        recurringFrequency: request.recurringFrequency,
       });
 
       // Сохраняем информацию о платеже в базе данных
@@ -94,8 +105,18 @@ export class PaymentController {
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
 
-      // Обрабатываем платеж
-      await this.processSuccessfulPayment(userId, amount, invoiceId);
+      // Проверяем, является ли платеж рекуррентным
+      const isRecurring = this.robokassaService.isRecurringPayment(data);
+
+      if (isRecurring) {
+        this.logger.log(
+          `Processing recurring payment for invoice ${invoiceId}`,
+        );
+        await this.processRecurringPayment(userId, amount, invoiceId);
+      } else {
+        this.logger.log(`Processing one-time payment for invoice ${invoiceId}`);
+        await this.processSuccessfulPayment(userId, amount, invoiceId);
+      }
 
       // Отправляем подтверждение Robokassa
       return res
@@ -380,6 +401,175 @@ export class PaymentController {
     } catch (error) {
       this.logger.error('Error notifying user about payment:', error);
       // Не выбрасываем ошибку, так как платеж уже обработан
+    }
+  }
+
+  @Post('create-recurring')
+  async createRecurringPayment(@Body() request: RecurringPaymentRequest) {
+    try {
+      this.logger.log(
+        `Creating recurring payment for user ${request.userId}: ${request.amount} RUB`,
+      );
+
+      // Создаем рекуррентный платеж
+      const paymentData = await this.robokassaService.createRecurringPayment({
+        userId: request.userId,
+        amount: request.amount,
+        description: request.description,
+        previousInvoiceId: request.previousInvoiceId,
+      });
+
+      // Сохраняем информацию о рекуррентном платеже в базе данных
+      await this.prismaService.payment.create({
+        data: {
+          invoiceId: paymentData.invoiceId.toString(),
+          userId: request.userId.toString(),
+          amount: request.amount,
+          packageType: 'premium_subscription',
+          description: request.description,
+          status: 'pending',
+        },
+      });
+
+      return {
+        success: true,
+        paymentUrl: paymentData.paymentUrl,
+        invoiceId: paymentData.invoiceId,
+      };
+    } catch (error) {
+      this.logger.error('Error creating recurring payment:', error);
+      return {
+        success: false,
+        error: 'Failed to create recurring payment',
+      };
+    }
+  }
+
+  @Post('cancel-recurring')
+  async cancelRecurringPayment(
+    @Body() body: { invoiceId: string; userId: number },
+  ) {
+    try {
+      this.logger.log(
+        `Cancelling recurring payment for invoice ${body.invoiceId}, user ${body.userId}`,
+      );
+
+      // Отменяем подписку в Robokassa
+      const cancelled = await this.robokassaService.cancelRecurringPayment(
+        body.invoiceId,
+      );
+
+      if (cancelled) {
+        // Обновляем статус в базе данных
+        await this.prismaService.payment.updateMany({
+          where: {
+            invoiceId: body.invoiceId,
+            userId: body.userId.toString(),
+          },
+          data: {
+            status: 'cancelled',
+          },
+        });
+
+        // Уведомляем пользователя
+        await this.telegramBotService.sendMessage(
+          body.userId,
+          `🔕 Подписка отменена\n\nВаша подписка была успешно отменена. Спасибо за использование нашего сервиса!`,
+        );
+
+        return {
+          success: true,
+          message: 'Recurring payment cancelled successfully',
+        };
+      } else {
+        return {
+          success: false,
+          error: 'Failed to cancel recurring payment',
+        };
+      }
+    } catch (error) {
+      this.logger.error('Error cancelling recurring payment:', error);
+      return {
+        success: false,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  private async processRecurringPayment(
+    userId: number,
+    amount: number,
+    invoiceId: number,
+  ) {
+    try {
+      this.logger.log(
+        `Processing recurring payment for user ${userId}: ${amount} RUB`,
+      );
+
+      // Для рекуррентных платежей обычно выдается фиксированное количество токенов
+      const videoTokens = 50; // Примерные токены для подписки
+      const imageTokens = 100;
+
+      // Обновляем токены пользователя в базе данных
+      await this.prismaService.user.upsert({
+        where: { telegramId: userId.toString() },
+        update: {
+          videoTokens: { increment: videoTokens },
+          imageTokens: { increment: imageTokens },
+          updatedAt: new Date(),
+        },
+        create: {
+          telegramId: userId.toString(),
+          videoTokens: videoTokens,
+          imageTokens: imageTokens,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      // Обновляем статус платежа
+      await this.updatePaymentStatus(invoiceId, 'completed');
+
+      // Уведомляем пользователя
+      await this.notifyUserAboutRecurringPayment(
+        userId,
+        amount,
+        videoTokens,
+        imageTokens,
+      );
+
+      this.logger.log(
+        `Recurring payment processed successfully for user ${userId}`,
+      );
+    } catch (error) {
+      this.logger.error('Error processing recurring payment:', error);
+      await this.updatePaymentStatus(invoiceId, 'failed');
+      throw error;
+    }
+  }
+
+  private async notifyUserAboutRecurringPayment(
+    userId: number,
+    amount: number,
+    videoTokens: number,
+    imageTokens: number,
+  ) {
+    try {
+      const message = `
+🔄 Автоплатеж по подписке выполнен!
+
+💰 Сумма: ${amount} ₽
+🎬 Видео токенов: +${videoTokens}
+🖼 Токенов изображений: +${imageTokens}
+
+Ваша подписка продлена! Токены зачислены на баланс.
+
+Отменить подписку можно в любой момент в настройках.
+      `;
+
+      await this.telegramBotService.sendMessage(userId, message);
+    } catch (error) {
+      this.logger.error('Error notifying user about recurring payment:', error);
     }
   }
 }
