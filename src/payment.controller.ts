@@ -173,10 +173,25 @@ export class PaymentController {
     }
   }
 
+  // Добавляем GET метод для Robokassa callback (на случай если они используют GET)
+  @Get('robokassa-callback')
+  async handleRobokassaCallbackGet(@Query() data: any, @Res() res: Response) {
+    this.logger.log('Received Robokassa GET callback:', JSON.stringify(data));
+    return this.handleRobokassaCallbackLogic(data, res);
+  }
+
   @Post('robokassa-callback')
   async handleRobokassaCallback(@Body() data: any, @Res() res: Response) {
+    this.logger.log('Received Robokassa POST callback:', JSON.stringify(data));
+    return this.handleRobokassaCallbackLogic(data, res);
+  }
+
+  private async handleRobokassaCallbackLogic(data: any, res: Response) {
     try {
-      this.logger.log('Received Robokassa callback:', JSON.stringify(data));
+      this.logger.log(
+        'Processing Robokassa callback:',
+        JSON.stringify(data, null, 2),
+      );
 
       // Проверяем подпись
       const isValid = this.robokassaService.verifyCallback(data);
@@ -198,6 +213,10 @@ export class PaymentController {
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
 
+      this.logger.log(
+        `Extracted data: userId=${userId}, amount=${amount}, invoiceId=${invoiceId}`,
+      );
+
       // Проверяем, является ли платеж рекуррентным
       const isRecurring = this.robokassaService.isRecurringPayment(data);
 
@@ -212,6 +231,9 @@ export class PaymentController {
       }
 
       // Отправляем подтверждение Robokassa
+      this.logger.log(
+        `Sending OK response to Robokassa for invoice ${invoiceId}`,
+      );
       return res.status(HttpStatus.OK).send(`OK${invoiceId}`); // Robokassa expects "OK" + invoice ID
     } catch (error) {
       this.logger.error('Error processing payment callback:', error);
@@ -316,7 +338,7 @@ export class PaymentController {
         <body>
             <div class="success">✅ Оплата прошла успешно!</div>
             <div class="message">Ваш баланс пополнен. Возвращайтесь в Telegram бот для использования токенов.</div>
-            <a href="https://t.me/your_bot_username" class="button">Вернуться в бот</a>
+            <a href="https://t.me/Kling_tgbot" class="button">Вернуться в бот</a>
         </body>
         </html>
       `;
