@@ -1,3 +1,92 @@
+const https = require('https');
+const http = require('http');
+const { URL } = require('url');
+
+// Простой HTTP клиент
+function makeRequest(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const client = urlObj.protocol === 'https:' ? https : http;
+
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path: urlObj.pathname + urlObj.search,
+      method: options.method || 'GET',
+      headers: options.headers || {},
+    };
+
+    const req = client.request(reqOptions, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          resolve(result);
+        } catch (e) {
+          resolve(data);
+        }
+      });
+    });
+
+    req.on('error', reject);
+
+    if (options.body) {
+      req.write(JSON.stringify(options.body));
+    }
+
+    req.end();
+  });
+}
+
+// Тест полного цикла покупки тарифа
+async function testFullPaymentFlow() {
+  console.log('=== Тест полного цикла покупки и использования ===');
+
+  const userId = 123456; // Тестовый пользователь
+  const baseUrl = 'http://localhost:3000';
+
+  try {
+    console.log('1. Создаем платеж за тариф БАЗОВЫЙ...');
+
+    const result = await makeRequest(`${baseUrl}/payment/create-tariff`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: {
+        userId: userId,
+        tariffType: 'basic',
+        recurring: false,
+      },
+    });
+
+    if (result.success) {
+      console.log('✅ Платеж создан успешно!');
+      console.log(`💰 Сумма: ${result.amount}₽`);
+      console.log(`📦 Видео токенов: ${result.tariff.videoTokens}`);
+      console.log(`🖼 Изображений токенов: ${result.tariff.imageTokens}`);
+      console.log(`🔗 URL для оплаты:`);
+      console.log(result.paymentUrl);
+
+      console.log('\n=== Инструкции ===');
+      console.log('1. Откройте URL выше в браузере');
+      console.log('2. Проведите тестовый платеж');
+      console.log('3. После успешной оплаты токены будут зачислены');
+      console.log('4. Проверьте работу генерации изображений в боте');
+
+      console.log('\n=== URL для callback (для настройки в Robokassa) ===');
+      console.log(`${baseUrl}/payment/robokassa-callback`);
+      console.log(`${baseUrl}/payment/success - URL успешной оплаты`);
+      console.log(`${baseUrl}/payment/fail - URL неуспешной оплаты`);
+    } else {
+      console.log('❌ Ошибка создания платежа:', result.error);
+    }
+  } catch (error) {
+    console.error('❌ Ошибка теста:', error.message);
+  }
+}
+
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
@@ -127,6 +216,17 @@ async function testImageGeneration() {
   }
 }
 
+// Запускаем тест платежной системы
+console.log('🚀 Запуск теста платежной системы...');
+testFullPaymentFlow()
+  .then(() => {
+    console.log('✅ Тест завершён');
+  })
+  .catch((error) => {
+    console.error('❌ Критическая ошибка:', error);
+  });
+
+// Также оставляем тест изображений
 console.log('🚀 Запуск теста полной генерации изображений...');
 testImageGeneration()
   .then(() => {

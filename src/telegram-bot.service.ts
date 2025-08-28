@@ -549,6 +549,18 @@ ${subscriptionStatus}
         this.userStates.delete(chatId); // Clear user state
         this.sendMainMenu(chatId);
         break;
+      case 'buy_tokens':
+        this.showTariffPlans(chatId);
+        break;
+      case 'tariff_basic':
+        this.handleTariffPurchase(chatId, 'basic', false);
+        break;
+      case 'tariff_premium':
+        this.handleTariffPurchase(chatId, 'premium', false);
+        break;
+      case 'tariff_unlimited':
+        this.handleTariffPurchase(chatId, 'unlimited', false);
+        break;
       case 'video':
         this.handleVideoCommand(chatId);
         break;
@@ -1271,6 +1283,229 @@ ${subscriptionStatus}
     this.bot.sendMessage(chatId, confirmationText, { reply_markup: keyboard });
   }
 
+  /**
+   * Проверяет баланс пользователя перед генерацией
+   */
+  private async checkUserBalance(
+    userId: number,
+    requiredTokens: number,
+    tokenType: 'video' | 'image',
+  ): Promise<{
+    hasBalance: boolean;
+    currentBalance: number;
+    message?: string;
+  }> {
+    try {
+      // Получаем пользователя из базы данных
+      const user = await this.prisma.user.findUnique({
+        where: { telegramId: userId.toString() },
+      });
+
+      if (!user) {
+        return {
+          hasBalance: false,
+          currentBalance: 0,
+          message: 'Пользователь не найден в базе данных',
+        };
+      }
+
+      const currentBalance =
+        tokenType === 'video' ? user.videoTokens : user.imageTokens;
+
+      if (currentBalance < requiredTokens) {
+        const tokenName = tokenType === 'video' ? 'видео' : 'изображений';
+        return {
+          hasBalance: false,
+          currentBalance,
+          message: `❌ Недостаточно токенов для генерации!
+
+💰 Требуется: ${requiredTokens} токенов для ${tokenName}
+🏦 У вас: ${currentBalance} токенов
+
+Для покупки токенов используйте /buy`,
+        };
+      }
+
+      return {
+        hasBalance: true,
+        currentBalance,
+      };
+    } catch (error) {
+      this.logger.error('Error checking user balance:', error);
+      return {
+        hasBalance: false,
+        currentBalance: 0,
+        message: 'Ошибка проверки баланса. Попробуйте позже.',
+      };
+    }
+  }
+
+  /**
+   * Списывает токены у пользователя
+   */
+  private async deductTokens(
+    userId: number,
+    tokens: number,
+    tokenType: 'video' | 'image',
+  ): Promise<boolean> {
+    try {
+      const updateData =
+        tokenType === 'video'
+          ? { videoTokens: { decrement: tokens } }
+          : { imageTokens: { decrement: tokens } };
+
+      await this.prisma.user.update({
+        where: { telegramId: userId.toString() },
+        data: updateData,
+      });
+
+      this.logger.log(
+        `Deducted ${tokens} ${tokenType} tokens from user ${userId}`,
+      );
+      return true;
+    } catch (error) {
+      this.logger.error('Error deducting tokens:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Обрабатывает покупку тарифа
+   */
+  private async handleTariffPurchase(
+    chatId: number,
+    tariffType: 'basic' | 'premium' | 'unlimited',
+    recurring: boolean,
+  ) {
+    try {
+      this.logger.log(
+        `Creating tariff payment: ${tariffType}, recurring: ${recurring}, user: ${chatId}`,
+      );
+
+      // Отправляем запрос на создание платежа
+      const response = await fetch(
+        'http://localhost:3000/payment/create-tariff',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: chatId,
+            tariffType: tariffType,
+            recurring: recurring,
+          }),
+        },
+      );
+
+      const result = await response.json();
+
+      if (result.success) {
+        const tariffNames = {
+          basic: 'БАЗОВЫЙ',
+          premium: 'ПРЕМИУМ',
+          unlimited: 'БЕЗЛИМИТНЫЙ',
+        };
+
+        const text = `
+💳 **Оплата тарифа ${tariffNames[tariffType]}**
+
+💰 Сумма: ${result.amount}₽
+📦 Включено:
+   • ${result.tariff.videoTokens} видео токенов
+   • ${result.tariff.imageTokens} токенов изображений
+   ${recurring ? '• 🔄 Автоматическое продление каждый месяц' : '• 📅 Разовая покупка на месяц'}
+
+🔗 Для оплаты перейдите по ссылке ниже:
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '💳 Оплатить',
+                url: result.paymentUrl,
+              },
+            ],
+            [{ text: '🔙 Назад к тарифам', callback_data: 'buy_tokens' }],
+            [{ text: '🏠 Главное меню', callback_data: 'main' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, text, {
+          reply_markup: keyboard,
+          parse_mode: 'Markdown',
+        });
+
+        this.logger.log(
+          `Payment URL created for user ${chatId}: ${result.paymentUrl}`,
+        );
+      } else {
+        this.bot.sendMessage(
+          chatId,
+          `❌ Ошибка создания платежа: ${result.error}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error('Error creating tariff payment:', error);
+      this.bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка при создании платежа. Попробуйте позже.',
+      );
+    }
+  }
+
+  /**
+   * Показывает тарифные планы для покупки
+   */
+  private async showTariffPlans(chatId: number) {
+    const text = `
+💰 **Тарифные планы**
+
+Выберите подходящий тариф для использования нашего сервиса:
+
+🔹 **БАЗОВЫЙ** - 299₽
+   • 10 видео токенов
+   • 50 изображений токенов
+   • На 1 месяц
+
+💎 **ПРЕМИУМ** - 599₽
+   • 25 видео токенов
+   • 100 изображений токенов
+   • На 1 месяц
+
+🚀 **БЕЗЛИМИТНЫЙ** - 1299₽
+   • 100 видео токенов
+   • 500 изображений токенов
+   • На 1 месяц
+
+Все тарифы включают:
+✅ Высокое качество генерации
+✅ Быстрая обработка
+✅ Техническая поддержка
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🔹 БАЗОВЫЙ (299₽)', callback_data: 'tariff_basic' }],
+        [{ text: '💎 ПРЕМИУМ (599₽)', callback_data: 'tariff_premium' }],
+        [{ text: '🚀 БЕЗЛИМИТНЫЙ (1299₽)', callback_data: 'tariff_unlimited' }],
+        [
+          {
+            text: '🔄 Подписка (авто-продление)',
+            callback_data: 'show_recurring_tariffs',
+          },
+        ],
+        [{ text: '🔙 Назад', callback_data: 'main' }],
+      ],
+    };
+
+    this.bot.sendMessage(chatId, text, {
+      reply_markup: keyboard,
+      parse_mode: 'Markdown',
+    });
+  }
+
   private handleImageAspectRatioChoice(chatId: number, aspectRatio: string) {
     const userState = this.userStates.get(chatId);
 
@@ -1332,11 +1567,40 @@ ${subscriptionStatus}
 
     const { prompt, aspectRatio } = userState.data;
 
+    // Проверяем баланс пользователя (1 токен за изображение)
+    const balanceCheck = await this.checkUserBalance(chatId, 1, 'image');
+
+    if (!balanceCheck.hasBalance) {
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: '💰 Купить токены', callback_data: 'buy_tokens' }],
+          [{ text: '🏠 Главное меню', callback_data: 'main' }],
+        ],
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        balanceCheck.message || 'Недостаточно токенов',
+        { reply_markup: keyboard },
+      );
+      return;
+    }
+
     this.logger.log(
       `Generating image with prompt: "${prompt}" and aspectRatio: ${aspectRatio}`,
     );
 
     try {
+      // Списываем токены перед генерацией
+      const tokensDeducted = await this.deductTokens(chatId, 1, 'image');
+      if (!tokensDeducted) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Ошибка списания токенов. Попробуйте позже.',
+        );
+        return;
+      }
+
       // Create Kling AI request for image
       const klingRequest: KlingImageRequest = {
         prompt,
@@ -1353,6 +1617,9 @@ ${subscriptionStatus}
 ⏳ Генерация изображения началась!
 Примерное время: 1-2 мин
 ID: ${generationResult.id}
+
+💰 Списан 1 токен
+🏦 Остаток: ${balanceCheck.currentBalance - 1} токенов
 
 🔔 Результат придет автоматически
 ⚠️ При ошибках уведомим в течение 10-20 секунд
@@ -1379,9 +1646,15 @@ ID: ${generationResult.id}
           progressMessage.message_id,
         );
       } else {
+        // Если генерация не запустилась, возвращаем токены
+        await this.prisma.user.update({
+          where: { telegramId: chatId.toString() },
+          data: { imageTokens: { increment: 1 } },
+        });
+
         this.bot.sendMessage(
           chatId,
-          '❌ Ошибка при запуске генерации. Попробуйте еще раз.',
+          '❌ Ошибка при запуске генерации. Токен возвращен. Попробуйте еще раз.',
         );
       }
 

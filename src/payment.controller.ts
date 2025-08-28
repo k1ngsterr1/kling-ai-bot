@@ -41,6 +41,102 @@ export class PaymentController {
     private readonly telegramBotService: TelegramBotService,
   ) {}
 
+  @Post('create-tariff')
+  async createTariffPayment(
+    @Body()
+    request: {
+      userId: number;
+      tariffType: 'basic' | 'premium' | 'unlimited';
+      recurring?: boolean;
+    },
+  ) {
+    try {
+      this.logger.log(
+        `Creating tariff payment for user ${request.userId}: ${request.tariffType}`,
+      );
+
+      // Определяем цену и параметры тарифа
+      const tariffConfig = {
+        basic: {
+          price: 299,
+          videoTokens: 10,
+          imageTokens: 50,
+          description: 'Базовый тариф - 10 видео + 50 изображений',
+        },
+        premium: {
+          price: 599,
+          videoTokens: 25,
+          imageTokens: 100,
+          description: 'Премиум тариф - 25 видео + 100 изображений',
+        },
+        unlimited: {
+          price: 1299,
+          videoTokens: 100,
+          imageTokens: 500,
+          description: 'Безлимитный тариф - 100 видео + 500 изображений',
+        },
+      };
+
+      const tariff = tariffConfig[request.tariffType];
+      if (!tariff) {
+        throw new Error(`Unknown tariff type: ${request.tariffType}`);
+      }
+
+      // Создаем запрос на оплату
+      const paymentRequest = {
+        userId: request.userId,
+        amount: tariff.price,
+        description: tariff.description,
+        recurring: request.recurring || false,
+        recurringFrequency: request.recurring
+          ? ('monthly' as const)
+          : undefined,
+      };
+
+      const result =
+        await this.robokassaService.createPaymentUrl(paymentRequest);
+
+      // Сохраняем информацию о платеже в базу данных
+      await this.prismaService.payment.create({
+        data: {
+          userId: request.userId.toString(),
+          amount: tariff.price,
+          invoiceId: result.invoiceId.toString(),
+          status: 'pending',
+          packageType: `tariff_${request.tariffType}`,
+          description: tariff.description,
+          isRecurring: request.recurring || false,
+          recurringFrequency: request.recurring ? 'monthly' : null,
+          videoTokensGranted: tariff.videoTokens,
+          imageTokensGranted: tariff.imageTokens,
+        },
+      });
+
+      this.logger.log(
+        `Payment created for user ${request.userId}, invoice: ${result.invoiceId}`,
+      );
+
+      return {
+        success: true,
+        paymentUrl: result.paymentUrl,
+        invoiceId: result.invoiceId,
+        amount: tariff.price,
+        tariff: {
+          type: request.tariffType,
+          videoTokens: tariff.videoTokens,
+          imageTokens: tariff.imageTokens,
+          recurring: request.recurring || false,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error creating tariff payment:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
   @Post('create')
   async createPayment(@Body() request: PaymentRequest) {
     try {
@@ -75,11 +171,61 @@ export class PaymentController {
     }
   }
 
+  @Post('robokassa-callback')
+  async handleRobokassaCallback(@Body() data: any, @Res() res: Response) {
+    try {
+      this.logger.log('Received Robokassa callback:', JSON.stringify(data));
+
+      // Проверяем подпись
+      const isValid = this.robokassaService.verifyCallback(data);
+      if (!isValid) {
+        this.logger.error('Invalid signature in callback:', data);
+        return res
+          .status(HttpStatus.BAD_REQUEST)
+          .send(
+            this.robokassaService.formatRobokassaResponse(
+              false,
+              'Invalid signature',
+            ),
+          );
+      }
+
+      // Извлекаем данные пользователя
+      const { userId } =
+        this.robokassaService.extractUserDataFromCallback(data);
+      const amount = parseFloat(data.OutSum);
+      const invoiceId = parseInt(data.InvId);
+
+      // Проверяем, является ли платеж рекуррентным
+      const isRecurring = this.robokassaService.isRecurringPayment(data);
+
+      if (isRecurring) {
+        this.logger.log(
+          `Processing recurring payment for invoice ${invoiceId}`,
+        );
+        await this.processRecurringPayment(userId, amount, invoiceId);
+      } else {
+        this.logger.log(`Processing one-time payment for invoice ${invoiceId}`);
+        await this.processSuccessfulPayment(userId, amount, invoiceId);
+      }
+
+      // Отправляем подтверждение Robokassa
+      return res.status(HttpStatus.OK).send(`OK${invoiceId}`); // Robokassa expects "OK" + invoice ID
+    } catch (error) {
+      this.logger.error('Error processing payment callback:', error);
+      return res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .send(
+          this.robokassaService.formatRobokassaResponse(
+            false,
+            'Internal server error',
+          ),
+        );
+    }
+  }
+
   @Post('callback')
-  async handleCallback(
-    @Body() data: RobokassaCallbackData,
-    @Res() res: Response,
-  ) {
+  async handlePaymentCallback(@Body() data: any, @Res() res: Response) {
     try {
       this.logger.log(`Received payment callback for invoice ${data.InvId}`);
       this.logger.debug('Callback data:', JSON.stringify(data, null, 2));
