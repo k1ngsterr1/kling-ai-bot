@@ -59,8 +59,9 @@ async function generateImage() {
     // Данные для генерации изображения
     const imageData = {
       model: 'kling-v-1',
-      prompt: 'A cute cat sitting on a sunny windowsill, digital art style',
-      aspect_ratio: '1:1',
+      prompt:
+        'A futuristic cyberpunk city at night with neon lights reflecting in the rain, high detail, cinematic',
+      aspect_ratio: '16:9',
     };
 
     console.log('📤 Отправляю запрос на генерацию изображения...');

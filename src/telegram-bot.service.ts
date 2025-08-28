@@ -5490,7 +5490,7 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       case 2000:
         return { videoTokens: 100, imageTokens: 200 };
       default:
-        return { videoTokens: 1, imageTokens: 3 };
+        return { videoTokens: 25, imageTokens: 100 };
     }
   }
 
