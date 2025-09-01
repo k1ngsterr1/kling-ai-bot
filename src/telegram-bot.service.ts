@@ -1312,7 +1312,6 @@ ${subscriptionStatus}${subscriptionDetails}
     const totalCost = duration === 5 ? 4 : 8;
 
     const confirmationText = `
-3.4 Пользователь выбрал формат видео
 ✅ Ваш заказ:
 Модель: V2.1 ${qualityNames[quality]}
 Длительность: ${duration}s
@@ -1860,7 +1859,6 @@ ID: ${generationResult.id}
       );
 
       const generationText = `
-3.5 Пользователь Нажал кнопку [⚡ Начать генерацию]
 ⏳ Генерация начата!
 ID: #${generationResult.id}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
@@ -1961,7 +1959,6 @@ ID: #${generationResult.id}
         // Update progress message
         const estimatedMinutes = Math.ceil(180 / 60); // 3 minutes default
         const updatedText = `
-3.5 Пользователь Нажал кнопку [⚡ Начать генерацию]
 ⏳ Генерация начата!
 ID: #${videoId}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
