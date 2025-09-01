@@ -2926,14 +2926,32 @@ ID: ${imageId}
         }
       }
 
-      // Save the prompt and go directly to settings
+      // Save the prompt and show photo upload option
       this.userStates.set(chatId, {
         state: 'video_prompt_received',
         data: { prompt: text, images: [] },
       });
 
-      // Go directly to video settings without intermediate message
-      this.handleVideoSettings(chatId);
+      const responseText = `
+✅ Промпт сохранен: "${text}"
+
+📸 Добавить изображения? (до 2 шт., необязательно)
+
+🖼️ Как использовать изображения:
+• Standard/PRO: фото задают стиль и атмосферу
+• MASTER: Фото 1 = объект, Фото 2 = фон
+
+💡 Можете сразу перейти к настройкам или добавить фото
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: '⚙️ Настройки генерации', callback_data: 'video_settings' }],
+          [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+        ],
+      };
+
+      this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
       return;
     }
 
