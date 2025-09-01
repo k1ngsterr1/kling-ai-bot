@@ -3002,7 +3002,16 @@ ID: ${imageId}
     const chatId = msg.chat.id;
     const userState = this.userStates.get(chatId);
 
-    if (userState?.state === 'video_prompt_received') {
+    // Check if user is in any video generation state
+    if (
+      userState?.state === 'video_prompt_received' ||
+      (userState?.data?.prompt &&
+        userState?.state?.includes &&
+        (userState.state.includes('video') ||
+          userState.state.includes('quality') ||
+          userState.state.includes('duration') ||
+          userState.state.includes('aspect')))
+    ) {
       const currentImages = userState.data?.images || [];
 
       if (currentImages.length >= 2) {
