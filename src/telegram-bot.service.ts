@@ -313,8 +313,6 @@ export class TelegramBotService {
     this.userStates.set(chatId, { state: 'waiting_video_prompt' });
 
     const videoText = `
-🎬 [Видео] /video
-
 🌟 Вы используете Kling 2.1 
 📝 Опишите видео максимально подробно + можно добавить до 2 фото:
 
@@ -348,8 +346,6 @@ export class TelegramBotService {
     this.userStates.set(chatId, { state: 'waiting_image_prompt' });
 
     const imageText = `
-🖼️ [Изображение] /img
-
 🌟 Вы используете Kling 2.1 
 📝 Опишите изображение максимально подробно:
 
@@ -2930,29 +2926,14 @@ ID: ${imageId}
         }
       }
 
-      // Save the prompt
+      // Save the prompt and go directly to settings
       this.userStates.set(chatId, {
         state: 'video_prompt_received',
         data: { prompt: text, images: [] },
       });
 
-      const responseText = `
-✅ Промпт получен: "${text}"
-
-📸 Теперь можете добавить до 2 изображений (необязательно) или сразу перейти к настройкам генерации.
-
-Что делаем дальше?
-      `;
-
-      const keyboard = {
-        inline_keyboard: [
-          [{ text: '⚙️ Настройки генерации', callback_data: 'video_settings' }],
-          [{ text: '🔙 Назад к видео', callback_data: 'video' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main' }],
-        ],
-      };
-
-      this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      // Go directly to video settings without intermediate message
+      this.handleVideoSettings(chatId);
       return;
     }
 
@@ -2974,15 +2955,13 @@ ID: ${imageId}
         }
       }
 
-      // Save the prompt and show aspect ratio selection
+      // Save the prompt and show aspect ratio selection directly
       this.userStates.set(chatId, {
         state: 'image_prompt_received',
         data: { prompt: text },
       });
 
       const responseText = `
-✅ Промпт получен: "${text}"
-
 📐 Выберите соотношение сторон для изображения:
       `;
 
