@@ -119,7 +119,7 @@ export class KlingAiService implements OnModuleInit {
     this.jwtTokenExpiry = 0;
 
     this.httpClient = axios.create({
-      baseURL: 'https://api-singapore.klingai.com',
+      baseURL: 'https://api.klingai.com',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -129,8 +129,8 @@ export class KlingAiService implements OnModuleInit {
 
     // Request interceptor for JWT token
     this.httpClient.interceptors.request.use(
-      async (config) => {
-        const token = await this.generateJwtToken();
+      (config) => {
+        const token = this.generateJwtToken();
         config.headers.Authorization = `Bearer ${token}`;
         return config;
       },
@@ -246,6 +246,7 @@ export class KlingAiService implements OnModuleInit {
     const token = jwt.sign(payload, this.secretKey, {
       algorithm: 'HS256',
       header: header,
+      noTimestamp: true, // Убираем автоматическое поле iat
     });
 
     // Cache the token
@@ -614,7 +615,7 @@ export class KlingAiService implements OnModuleInit {
           const response = await this.httpClient.get('/v1/images/generations', {
             params: {
               page: 1,
-              size: 20, // Get more tasks to find our ID
+              size: 50, // Get more tasks to find our ID
             },
             timeout: 30000, // 30 seconds timeout for status check
           });
@@ -719,7 +720,7 @@ export class KlingAiService implements OnModuleInit {
           const response = await this.httpClient.get('/v1/images/generations', {
             params: {
               page: 1,
-              size: 20, // Get more tasks to find our ID
+              size: 50, // Get more tasks to find our ID
             },
             timeout: 15000, // 15 seconds timeout
           });

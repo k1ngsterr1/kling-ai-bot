@@ -4,7 +4,9 @@ const jwt = require('jsonwebtoken');
 // Use the same keys from your test script
 const ACCESS_KEY = 'AgYCCpYCmYhhyANmh3mtrf8bQaAe3pTH';
 const SECRET_KEY = 'bdJEagGGEfNpbCpCCfELmyTape9AJ9Kr';
-const TARGET_TASK_ID = '789627571846647814';
+
+// Get task ID from command line argument
+const TARGET_TASK_ID = process.argv[2] || '789627571846647814';
 
 function generateJwtToken() {
   const now = Math.floor(Date.now() / 1000);
@@ -27,7 +29,7 @@ async function fetchTask() {
 
   try {
     const response = await axios.get(
-      'https://api-singapore.klingai.com/v1/images/generations',
+      'https://api.klingai.com/v1/images/generations',
       {
         headers: { Authorization: `Bearer ${token}` },
         params: { page: 1, size: 50 },

@@ -60,7 +60,13 @@ async function generateImage() {
     const imageData = {
       model: 'kling-v-1',
       prompt:
-        'A futuristic cyberpunk city at night with neon lights reflecting in the rain, high detail, cinematic',
+        'Портрет эльфийской принцессы с золотыми волосами в волшебном лесу',
+      // Альтернативные промпты для тестирования:
+      // 'Beautiful magical forest with glowing mushrooms and fairy lights, enchanted atmosphere, fantasy art style, highly detailed',
+      // 'A futuristic cyberpunk city at night with neon lights reflecting in the rain, high detail, cinematic'
+      // 'Majestic dragon flying over ancient castle, golden sunset, epic fantasy scene, 8k quality'
+      // 'Cozy coffee shop interior with warm lighting, books on shelves, steaming cup of coffee, peaceful atmosphere'
+      // 'Space station orbiting Earth, astronauts in spacesuits, realistic sci-fi, detailed cosmic background'
       aspect_ratio: '16:9',
     };
 
