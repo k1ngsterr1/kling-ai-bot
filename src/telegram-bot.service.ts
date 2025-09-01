@@ -3001,16 +3001,83 @@ ID: ${imageId}
   private handlePhotoMessage(msg: TelegramBot.Message) {
     const chatId = msg.chat.id;
     const userState = this.userStates.get(chatId);
+    const caption = msg.caption?.trim();
 
-    // Check if user is in any video generation state
+    // If photo has caption and user is not in video flow, treat caption as video prompt
     if (
-      userState?.state === 'video_prompt_received' ||
-      (userState?.data?.prompt &&
-        userState?.state?.includes &&
-        (userState.state.includes('video') ||
-          userState.state.includes('quality') ||
-          userState.state.includes('duration') ||
-          userState.state.includes('aspect')))
+      caption &&
+      (!userState || userState.state !== 'video_prompt_received')
+    ) {
+      if (caption.length > 300) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
+        );
+        return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
+      }
+
+      // Get the highest resolution photo
+      const photo = msg.photo?.[msg.photo.length - 1];
+      if (photo) {
+        // Start video generation flow with prompt and first image
+        this.userStates.set(chatId, {
+          state: 'video_prompt_received',
+          data: {
+            prompt: caption,
+            images: [
+              {
+                file_id: photo.file_id,
+                file_unique_id: photo.file_unique_id,
+              },
+            ],
+          },
+        });
+
+        const responseText = `
+📸 Изображение 1/2 добавлено!
+📷 Можете добавить еще 1 изображение
+
+Промпт: "${caption}"
+Изображений: 1/2
+
+Готовы к генерации?
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '⚙️ Настройки генерации',
+                callback_data: 'video_settings',
+              },
+            ],
+            [
+              {
+                text: '🗑️ Очистить изображения',
+                callback_data: 'clear_images',
+              },
+            ],
+            [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      }
+      return;
+    }
+
+    // Check if user is in video generation process (has video prompt)
+    if (
+      userState?.data?.prompt &&
+      userState?.state === 'video_prompt_received'
     ) {
       const currentImages = userState.data?.images || [];
 
@@ -3122,6 +3189,74 @@ ${
 
     // If format and size are valid, treat as image for video generation
     const userState = this.userStates.get(chatId);
+    const caption = msg.caption?.trim();
+
+    // If document has caption and user is not in video flow, treat caption as video prompt
+    if (
+      caption &&
+      (!userState || userState.state !== 'video_prompt_received')
+    ) {
+      if (caption.length > 300) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
+        );
+        return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
+      }
+
+      // Start video generation flow with prompt and first image
+      this.userStates.set(chatId, {
+        state: 'video_prompt_received',
+        data: {
+          prompt: caption,
+          images: [
+            {
+              file_id: document.file_id,
+              file_unique_id: document.file_unique_id,
+            },
+          ],
+        },
+      });
+
+      const responseText = `
+📸 Изображение 1/2 добавлено!
+📷 Можете добавить еще 1 изображение
+
+Промпт: "${caption}"
+Изображений: 1/2
+
+Готовы к генерации?
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: '⚙️ Настройки генерации',
+              callback_data: 'video_settings',
+            },
+          ],
+          [
+            {
+              text: '🗑️ Очистить изображения',
+              callback_data: 'clear_images',
+            },
+          ],
+          [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+        ],
+      };
+
+      this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      return;
+    }
 
     if (userState?.state === 'video_prompt_received') {
       const currentImages = userState.data?.images || [];
