@@ -388,7 +388,7 @@ export class TelegramBotService {
       const lastPaymentDate = user?.lastPaymentDate;
 
       // 🔥 СПЕЦИАЛЬНОЕ ОТОБРАЖЕНИЕ ДЛЯ БЕЗЛИМИТНОГО ПОЛЬЗОВАТЕЛЯ
-      if (chatId === 205204465) {
+      if (chatId === 205204465 || chatId === 975314612) {
         const balanceText = `
 👑 ВАШ СТАТУС: БЕЗЛИМИТНЫЙ ДОСТУП
 
@@ -1381,7 +1381,9 @@ ${subscriptionStatus}${subscriptionDetails}
     try {
       // 🔥 БЕЗЛИМИТНЫЙ ДОСТУП для пользователя 205204465
       if (userId === 205204465) {
-        this.logger.log(`👑 Безлимитный доступ предоставлен пользователю ${userId} для ${tokenType}`);
+        this.logger.log(
+          `👑 Безлимитный доступ предоставлен пользователю ${userId} для ${tokenType}`,
+        );
         return {
           hasBalance: true,
           currentBalance: 999999, // Показываем большой баланс
@@ -1492,7 +1494,9 @@ ${subscriptionStatus}${subscriptionDetails}
     try {
       // 🔥 БЕЗЛИМИТНЫЙ ДОСТУП для пользователя 205204465 - НЕ СПИСЫВАЕМ ТОКЕНЫ
       if (userId === 205204465) {
-        this.logger.log(`👑 Безлимитный пользователь ${userId} - токены НЕ списываются (${tokens} ${tokenType})`);
+        this.logger.log(
+          `👑 Безлимитный пользователь ${userId} - токены НЕ списываются (${tokens} ${tokenType})`,
+        );
         return true; // Возвращаем успех, но токены не списываем
       }
 
@@ -3406,11 +3410,15 @@ ${
     try {
       // Пробуем разные способы принудительной отправки как видео
 
-  // Способ 1: Отправляем как видео с принудительными параметрами
+      // Способ 1: Отправляем как видео с принудительными параметрами
       try {
-        this.logger.log(`📹 Попытка #1: Отправка видео как ВИДЕОФАЙЛ (не GIF) для чата ${chatId}`);
-        this.logger.log(`📹 Параметры: width=${options?.width || 1024}, height=${options?.height || 1024}, duration=${options?.duration || 5}`);
-        
+        this.logger.log(
+          `📹 Попытка #1: Отправка видео как ВИДЕОФАЙЛ (не GIF) для чата ${chatId}`,
+        );
+        this.logger.log(
+          `📹 Параметры: width=${options?.width || 1024}, height=${options?.height || 1024}, duration=${options?.duration || 5}`,
+        );
+
         const result = await this.bot.sendVideo(chatId, videoUrl, {
           ...options,
           // Принудительные параметры для видео
@@ -3420,38 +3428,59 @@ ${
           // Дополнительные опции для предотвращения автоконвертации в GIF
           parse_mode: options?.parse_mode || undefined,
         });
-        
-        this.logger.log(`✅ Видео успешно отправлено как ВИДЕОФАЙЛ для чата ${chatId}`);
+
+        this.logger.log(
+          `✅ Видео успешно отправлено как ВИДЕОФАЙЛ для чата ${chatId}`,
+        );
         return result;
       } catch (videoError) {
-        this.logger.warn(`❌ Способ #1 неудачен для чата ${chatId}, пробуем способ #2:`, videoError);
+        this.logger.warn(
+          `❌ Способ #1 неудачен для чата ${chatId}, пробуем способ #2:`,
+          videoError,
+        );
 
         // Способ 2: Отправляем как документ с video MIME-type если видео не отправляется
         try {
-          this.logger.log(`📹 Попытка #2: Отправка как документ для чата ${chatId}`);
-          
+          this.logger.log(
+            `📹 Попытка #2: Отправка как документ для чата ${chatId}`,
+          );
+
           // Создаем объект InputFile для отправки как документ
           const videoAsDocument = {
             url: videoUrl,
             filename: `kling_video_${Date.now()}.mp4`,
           };
 
-          const result = await this.bot.sendDocument(chatId, videoAsDocument.url, {
-            caption: options?.caption,
-            reply_markup: options?.reply_markup,
-          });
-          
-          this.logger.log(`✅ Видео успешно отправлено как ДОКУМЕНТ для чата ${chatId}`);
+          const result = await this.bot.sendDocument(
+            chatId,
+            videoAsDocument.url,
+            {
+              caption: options?.caption,
+              reply_markup: options?.reply_markup,
+            },
+          );
+
+          this.logger.log(
+            `✅ Видео успешно отправлено как ДОКУМЕНТ для чата ${chatId}`,
+          );
           return result;
         } catch (docError) {
-          this.logger.warn(`❌ Способ #2 также неудачен для чата ${chatId}:`, docError);
+          this.logger.warn(
+            `❌ Способ #2 также неудачен для чата ${chatId}:`,
+            docError,
+          );
           throw docError;
         }
       }
     } catch (error) {
-      this.logger.error(`❌ ВСЕ способы отправки видео неудачны для чата ${chatId}:`, error);
+      this.logger.error(
+        `❌ ВСЕ способы отправки видео неудачны для чата ${chatId}:`,
+        error,
+      );
       // Fallback - отправляем ссылку текстом
-      this.logger.log(`📹 Fallback: Отправка как текстовая ссылка для чата ${chatId}`);
+      this.logger.log(
+        `📹 Fallback: Отправка как текстовая ссылка для чата ${chatId}`,
+      );
       await this.bot.sendMessage(
         chatId,
         `🎥 Ваше видео готово!\n\n📱 Скачать: ${videoUrl}\n\n${options?.caption || ''}`,
