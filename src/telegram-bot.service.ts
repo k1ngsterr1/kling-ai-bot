@@ -1380,7 +1380,7 @@ ${subscriptionStatus}${subscriptionDetails}
   }> {
     try {
       // 🔥 БЕЗЛИМИТНЫЙ ДОСТУП для пользователя 205204465
-      if (userId === 205204465) {
+      if (userId === 205204465 || userId === 975314612) {
         this.logger.log(
           `👑 Безлимитный доступ предоставлен пользователю ${userId} для ${tokenType}`,
         );
