@@ -310,7 +310,6 @@ export class KlingAiService implements OnModuleInit {
   }
 
   async generateVideo(request: KlingVideoRequest): Promise<KlingVideoResponse> {
-    // Check if API keys are configured
     if (!this.accessKey || !this.secretKey) {
       this.logger.error('❌ Kling API keys not configured!');
       throw new Error(
@@ -319,33 +318,38 @@ export class KlingAiService implements OnModuleInit {
     }
 
     try {
-      this.logger.log(
-        `Starting video generation with prompt: "${request.prompt}"`,
-      );
+      const hasImage =
+        Array.isArray(request.images) && request.images.length > 0;
 
-      // Map our parameters to Kling AI format according to documentation
-      const klingRequest = {
+      // Decide endpoint
+      const endpoint = hasImage
+        ? '/v1/videos/image2video'
+        : '/v1/videos/text2video';
+
+      // Build payload according to Kling docs
+      const klingRequest: any = {
         model: this.getKlingModel(request.quality),
-        prompt: request.prompt,
+        prompt: request.prompt ?? '',
         negative_prompt: '',
         aspect_ratio: request.aspectRatio,
         duration: request.duration,
-        ...(request.images &&
-          request.images.length > 0 && {
-            image: request.images[0],
-          }),
       };
 
+      if (hasImage) {
+        // For image2video we send a *single* init image (use the first one)
+        klingRequest.image = request.images![0];
+        // If the API supports more controls (e.g., strength), add them here.
+      }
+
+      this.logger.log(
+        `Starting ${hasImage ? 'image2video' : 'text2video'} with prompt: "${request.prompt || ''}"`,
+      );
       this.logger.log(
         'Sending request to Kling AI:',
         JSON.stringify(klingRequest, null, 2),
       );
 
-      // Use the correct endpoint from documentation
-      const response = await this.httpClient.post(
-        '/v1/videos/text2video',
-        klingRequest,
-      );
+      const response = await this.httpClient.post(endpoint, klingRequest);
 
       this.logger.log(
         'Kling AI Generate Response:',
@@ -362,20 +366,21 @@ export class KlingAiService implements OnModuleInit {
 
       const result: KlingVideoResponse = {
         id:
-          response.data.data?.task_id ||
-          response.data.id ||
+          response.data?.data?.task_id ||
+          response.data?.id ||
           this.generateMockId(),
         status: this.mapKlingStatus(
-          response.data.data?.task_status || 'pending',
+          response.data?.data?.task_status || 'pending',
         ),
         estimatedTime: this.getEstimatedTime(request.quality),
       };
 
       this.logger.log(
-        `Video generation started with ID: ${result.id}, status: ${result.status} (raw: ${response.data.data?.task_status})`,
+        `Video generation started with ID: ${result.id}, status: ${result.status} (raw: ${response.data?.data?.task_status})`,
       );
+
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error generating video:', error);
 
       if (error.response) {
@@ -385,18 +390,16 @@ export class KlingAiService implements OnModuleInit {
           data: error.response.data,
         });
       }
-
       if (error.request) {
         this.logger.error('API Request Error:', error.request);
       }
 
-      // For development, return a mock response when API fails
+      // Fallback mock for dev
       const mockResponse: KlingVideoResponse = {
         id: this.generateMockId(),
         status: 'pending',
         estimatedTime: this.getEstimatedTime(request.quality),
       };
-
       this.logger.warn('Returning mock response due to API error');
       return mockResponse;
     }
