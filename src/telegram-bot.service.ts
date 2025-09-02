@@ -3213,6 +3213,14 @@ ${
     }
   }
 
+  private async getTelegramFileUrl(fileId: string): Promise<string> {
+    const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    const file = await this.bot.getFile(fileId);
+    if (!file.file_path) throw new Error('Telegram did not return file_path');
+    // CAUTION: this URL contains your bot token — do not log it
+    return `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+  }
+
   private handleDocumentMessage(msg: TelegramBot.Message) {
     const chatId = msg.chat.id;
     const document = msg.document;

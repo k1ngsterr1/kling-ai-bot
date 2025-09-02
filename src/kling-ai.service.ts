@@ -336,7 +336,7 @@ export class KlingAiService implements OnModuleInit {
       };
 
       if (hasImage) {
-        // For image2video we send a *single* init image (use the first one)
+        this.logger.log('Including image in video generation request');
         klingRequest.image = request.images![0];
         // If the API supports more controls (e.g., strength), add them here.
       }
