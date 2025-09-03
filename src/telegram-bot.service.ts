@@ -1298,8 +1298,8 @@ ${subscriptionStatus}${subscriptionDetails}
 
     const keyboard = {
       inline_keyboard: [
-        [{ text: '[1:1 📱]', callback_data: 'aspect_1_1' }],
-        [{ text: '[9:16 �]', callback_data: 'aspect_9_16' }],
+        [{ text: '[1:1 🔲]', callback_data: 'aspect_1_1' }],
+        [{ text: '[9:16 📱]', callback_data: 'aspect_9_16' }],
         [{ text: '[16:9 📺]', callback_data: 'aspect_16_9' }],
         [{ text: '[Назад]', callback_data: 'change_duration' }],
       ],
@@ -1679,7 +1679,7 @@ ${subscriptionStatus}${subscriptionDetails}
     });
 
     const aspectRatioNames = {
-      '1:1': '⬜ 1:1 (квадрат)',
+      '1:1': '🔲 1:1 (квадрат)',
       '9:16': '📱 9:16 (вертикальное)',
       '16:9': '🖥️ 16:9 (горизонтальное)',
     };
