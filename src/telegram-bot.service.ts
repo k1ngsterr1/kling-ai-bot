@@ -1335,7 +1335,7 @@ ${subscriptionStatus}${subscriptionDetails}
     this.bot.sendMessage(chatId, aspectRatioText, { reply_markup: keyboard });
   }
 
-  private handleAspectRatioChoice(chatId: number, aspectRatio: string) {
+  private async handleAspectRatioChoice(chatId: number, aspectRatio: string) {
     const userState = this.userStates.get(chatId);
 
     if (!userState?.data) {
@@ -1377,13 +1377,36 @@ ${subscriptionStatus}${subscriptionDetails}
       totalCost = duration === 5 ? 4 : 8; // Master: 4 токена за 5с, 8 токенов за 10с
     }
 
+    // Получаем реальный баланс пользователя
+    let currentBalance = 0;
+    try {
+      // 🔥 СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ БЕЗЛИМИТНОГО ПОЛЬЗОВАТЕЛЯ
+      if (chatId === 205204465 || chatId === 975314612) {
+        currentBalance = 999999; // Показываем безлимит как большое число
+      } else {
+        await this.ensureUserExists(chatId);
+        const user = await this.prisma.user.findFirst({
+          where: { telegramId: chatId.toString() },
+        });
+        currentBalance = user?.videoTokens || 0;
+      }
+    } catch (error) {
+      this.logger.error('Error getting user balance:', error);
+      currentBalance = 0;
+    }
+
+    const balanceText =
+      chatId === 205204465 || chatId === 975314612
+        ? '∞ (безлимитный доступ)'
+        : `${currentBalance} токенов`;
+
     const confirmationText = `
 ✅ Ваш заказ:
 Модель: V2.1 ${qualityNames[quality]}
 Длительность: ${duration}s
 Промпт: "${prompt}"
 Стоимость: ${totalCost} токенов
-Текущий баланс: 100 токенов
+Текущий баланс: ${balanceText}
 
     `;
 
@@ -1695,7 +1718,10 @@ ${subscriptionStatus}${subscriptionDetails}
     });
   }
 
-  private handleImageAspectRatioChoice(chatId: number, aspectRatio: string) {
+  private async handleImageAspectRatioChoice(
+    chatId: number,
+    aspectRatio: string,
+  ) {
     const userState = this.userStates.get(chatId);
 
     if (!userState?.data?.prompt) {
@@ -1720,12 +1746,35 @@ ${subscriptionStatus}${subscriptionDetails}
       '16:9': '🖥️ 16:9 (горизонтальное)',
     };
 
+    // Получаем реальный баланс пользователя для изображений
+    let currentBalance = 0;
+    try {
+      // 🔥 СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ БЕЗЛИМИТНОГО ПОЛЬЗОВАТЕЛЯ
+      if (chatId === 205204465 || chatId === 975314612) {
+        currentBalance = 999999; // Показываем безлимит как большое число
+      } else {
+        await this.ensureUserExists(chatId);
+        const user = await this.prisma.user.findFirst({
+          where: { telegramId: chatId.toString() },
+        });
+        currentBalance = user?.imageTokens || 0;
+      }
+    } catch (error) {
+      this.logger.error('Error getting user image balance:', error);
+      currentBalance = 0;
+    }
+
+    const balanceText =
+      chatId === 205204465 || chatId === 975314612
+        ? '∞ (безлимитный доступ)'
+        : `${currentBalance} токенов`;
+
     const confirmationText = `
 ✅ Ваш заказ на изображение:
 Промпт: "${prompt}"
 Формат: ${aspectRatioNames[aspectRatio]}
 Стоимость: 1 токен
-Текущий баланс: 100 токенов
+Текущий баланс: ${balanceText}
     `;
 
     const keyboard = {
