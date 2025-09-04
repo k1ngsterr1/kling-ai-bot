@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from './prisma.service';
 
 export interface RobokassaPaymentRequest {
   userId: number;
@@ -51,7 +52,10 @@ export class RobokassaService {
   private readonly paymentUrl = 'https://auth.robokassa.ru/Merchant/Index.aspx';
   private readonly testMode: boolean;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
     this.merchantLogin =
       this.configService.get<string>('ROBOKASSA_MERCHANT_LOGIN') ||
       'kling_tgbot';
@@ -75,12 +79,27 @@ export class RobokassaService {
   async createPaymentUrl(
     request: RobokassaPaymentRequest,
   ): Promise<RobokassaPaymentUrl> {
-    const invoiceId = Date.now(); // Уникальный ID заказа
+    const invoiceId = Date.now(); // Простой timestamp
     const amount = request.amount.toFixed(2);
 
     this.logger.log(
       `Creating payment URL for user ${request.userId}, amount: ${amount} RUB`,
     );
+
+    // Создаем запись в БД для связи invoiceId с userId
+    await this.prisma.payment.create({
+      data: {
+        invoiceId: invoiceId.toString(),
+        userId: request.userId.toString(),
+        amount: request.amount,
+        packageType: 'video_tokens',
+        description: `Покупка ${amount} токенов`,
+        paymentMethod: 'robokassa',
+        status: 'pending',
+        videoTokensGranted: Math.floor(request.amount * 10), // 1 рубль = 10 токенов
+        imageTokensGranted: 0,
+      },
+    });
 
     // Формируем подпись (без пользовательских параметров для простоты)
     const signature = this.generatePaymentSignature(
@@ -97,7 +116,6 @@ export class RobokassaService {
       InvoiceID: invoiceId.toString(),
       Description: `Покупка ${amount} токенов`,
       SignatureValue: signature, // Используем SignatureValue
-      Shp_UserId: request.userId?.toString() || '', // Включаем ID пользователя только в URL
       Culture: 'ru', // Локализация
     });
 
@@ -271,17 +289,31 @@ export class RobokassaService {
   /**
    * Извлекает данные пользователя из callback'а
    */
-  extractUserDataFromCallback(data: RobokassaCallbackData): { userId: number } {
-    const userIdStr = data.Shp_UserId;
-
-    if (!userIdStr) {
-      throw new Error('Missing user ID in callback data');
+  async extractUserDataFromCallback(
+    data: RobokassaCallbackData,
+  ): Promise<{ userId: number }> {
+    // Сначала пытаемся получить из Shp_UserId (если есть)
+    if (data.Shp_UserId) {
+      const userIdFromShp = parseInt(data.Shp_UserId);
+      if (!isNaN(userIdFromShp)) {
+        return { userId: userIdFromShp };
+      }
     }
 
-    const userId = parseInt(userIdStr);
+    // Ищем в БД по invoiceId
+    const payment = await this.prisma.payment.findUnique({
+      where: {
+        invoiceId: data.InvId,
+      },
+    });
 
+    if (!payment) {
+      throw new Error(`Payment with invoice ${data.InvId} not found`);
+    }
+
+    const userId = parseInt(payment.userId);
     if (isNaN(userId)) {
-      throw new Error('Invalid user ID in callback data');
+      throw new Error('Invalid user ID in payment record');
     }
 
     return { userId };
