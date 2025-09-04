@@ -20,6 +20,7 @@ export interface RobokassaCallbackData {
   OutSum: string;
   InvId: string;
   SignatureValue: string;
+  Shp_UserId?: string; // ID пользователя
   Fee?: string; // Комиссия
   EMail?: string; // Email плательщика
   PaymentMethod?: string; // Способ оплаты
@@ -81,11 +82,11 @@ export class RobokassaService {
       `Creating payment URL for user ${request.userId}, amount: ${amount} RUB`,
     );
 
-    // Формируем подпись
+    // Формируем подпись (без пользовательских параметров для простоты)
     const signature = this.generatePaymentSignature(
       amount,
       invoiceId.toString(),
-      request.userId,
+      undefined, // Не включаем userId в подпись
       request.recurring,
     );
 
@@ -96,8 +97,7 @@ export class RobokassaService {
       InvoiceID: invoiceId.toString(),
       Description: `Покупка ${amount} токенов`,
       SignatureValue: signature, // Используем SignatureValue
-      // Временно убираем Shp_userId для отладки ошибки 29
-      // Shp_userId: request.userId?.toString() || '',
+      Shp_UserId: request.userId?.toString() || '', // Включаем ID пользователя только в URL
       Culture: 'ru', // Локализация
     });
 
