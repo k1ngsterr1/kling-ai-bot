@@ -207,11 +207,30 @@ export class PaymentController {
           );
       }
 
-      // Извлекаем данные пользователя
-      const { userId } =
-        this.robokassaService.extractUserDataFromCallback(data);
+      // Извлекаем данные из callback
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
+
+      // Получаем userId из базы данных по invoiceId
+      const payment = await this.prismaService.payment.findUnique({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        this.logger.error(
+          `Payment with invoice ${invoiceId} not found in database`,
+        );
+        return res
+          .status(HttpStatus.BAD_REQUEST)
+          .send(
+            this.robokassaService.formatRobokassaResponse(
+              false,
+              'Payment not found',
+            ),
+          );
+      }
+
+      const userId = payment.userId;
 
       this.logger.log(
         `Extracted data: userId=${userId}, amount=${amount}, invoiceId=${invoiceId}`,
@@ -269,11 +288,30 @@ export class PaymentController {
           );
       }
 
-      // Извлекаем данные пользователя
-      const { userId } =
-        this.robokassaService.extractUserDataFromCallback(data);
+      // Извлекаем данные из callback
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
+
+      // Получаем userId из базы данных по invoiceId
+      const payment = await this.prismaService.payment.findUnique({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        this.logger.error(
+          `Payment with invoice ${invoiceId} not found in database`,
+        );
+        return res
+          .status(HttpStatus.BAD_REQUEST)
+          .send(
+            this.robokassaService.formatRobokassaResponse(
+              false,
+              'Payment not found',
+            ),
+          );
+      }
+
+      const userId = payment.userId;
 
       // Проверяем, является ли платеж рекуррентным
       const isRecurring = this.robokassaService.isRecurringPayment(data);
@@ -402,7 +440,7 @@ export class PaymentController {
   }
 
   private async processSuccessfulPayment(
-    userId: number,
+    userId: string,
     amount: number,
     invoiceId: number,
   ) {
@@ -480,10 +518,10 @@ export class PaymentController {
     }
   }
 
-  private async ensureUserExists(userId: number): Promise<void> {
+  private async ensureUserExists(userId: string): Promise<void> {
     try {
       const existingUser = await this.prismaService.user.findUnique({
-        where: { telegramId: userId.toString() },
+        where: { telegramId: userId },
       });
 
       if (!existingUser) {
@@ -492,7 +530,7 @@ export class PaymentController {
         // Create a basic user record
         await this.prismaService.user.create({
           data: {
-            telegramId: userId.toString(),
+            telegramId: userId,
             username: null,
             firstName: null,
             lastName: null,
@@ -539,7 +577,7 @@ export class PaymentController {
   }
 
   private async updateUserBalance(
-    userId: number,
+    userId: string,
     videoTokens: number,
     imageTokens: number,
   ) {
@@ -550,7 +588,7 @@ export class PaymentController {
       );
 
       await this.prismaService.user.update({
-        where: { telegramId: userId.toString() },
+        where: { telegramId: userId },
         data: {
           videoTokens: {
             increment: videoTokens,
@@ -586,7 +624,7 @@ export class PaymentController {
   }
 
   private async notifyUserAboutPayment(
-    userId: number,
+    userId: string,
     amount: number,
     videoTokens: number,
     imageTokens: number,
@@ -617,7 +655,7 @@ export class PaymentController {
 
 Теперь вы можете создавать контент!`;
 
-      await this.telegramBotService.sendMessage(userId, message);
+      await this.telegramBotService.sendMessage(parseInt(userId), message);
     } catch (error) {
       this.logger.error('Error notifying user about payment:', error);
       // Не выбрасываем ошибку, так как платеж уже обработан
@@ -717,7 +755,7 @@ export class PaymentController {
   }
 
   private async processRecurringPayment(
-    userId: number,
+    userId: string,
     amount: number,
     invoiceId: number,
   ) {
@@ -769,7 +807,7 @@ export class PaymentController {
   }
 
   private async notifyUserAboutRecurringPayment(
-    userId: number,
+    userId: string,
     amount: number,
     videoTokens: number,
     imageTokens: number,
@@ -787,7 +825,7 @@ export class PaymentController {
 Отменить подписку можно в любой момент в настройках.
       `;
 
-      await this.telegramBotService.sendMessage(userId, message);
+      await this.telegramBotService.sendMessage(parseInt(userId), message);
     } catch (error) {
       this.logger.error('Error notifying user about recurring payment:', error);
     }

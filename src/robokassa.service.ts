@@ -269,25 +269,6 @@ export class RobokassaService {
   }
 
   /**
-   * Извлекает данные пользователя из callback'а
-   */
-  extractUserDataFromCallback(data: RobokassaCallbackData): { userId: number } {
-    const userIdStr = data.Shp_UserId;
-
-    if (!userIdStr) {
-      throw new Error('Missing user ID in callback data');
-    }
-
-    const userId = parseInt(userIdStr);
-
-    if (isNaN(userId)) {
-      throw new Error('Invalid user ID in callback data');
-    }
-
-    return { userId };
-  }
-
-  /**
    * Форматирует ответ для Robokassa
    */
   formatRobokassaResponse(success: boolean, message?: string): string {
