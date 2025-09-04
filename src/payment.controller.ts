@@ -209,7 +209,7 @@ export class PaymentController {
 
       // Извлекаем данные пользователя
       const { userId } =
-        this.robokassaService.extractUserDataFromCallback(data);
+        await this.robokassaService.extractUserDataFromCallback(data);
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
 
@@ -271,7 +271,7 @@ export class PaymentController {
 
       // Извлекаем данные пользователя
       const { userId } =
-        this.robokassaService.extractUserDataFromCallback(data);
+        await this.robokassaService.extractUserDataFromCallback(data);
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
 

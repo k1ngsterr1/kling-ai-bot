@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from './prisma.service';
 
 export interface RobokassaPaymentRequest {
   userId: number;
@@ -51,7 +52,10 @@ export class RobokassaService {
   private readonly paymentUrl = 'https://auth.robokassa.ru/Merchant/Index.aspx';
   private readonly testMode: boolean;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
     this.merchantLogin =
       this.configService.get<string>('ROBOKASSA_MERCHANT_LOGIN') ||
       'kling_tgbot';
@@ -82,11 +86,26 @@ export class RobokassaService {
       `Creating payment URL for user ${request.userId}, amount: ${amount} RUB`,
     );
 
-    // Формируем подпись
+    // Создаем запись в БД для связи invoiceId с userId
+    await this.prisma.payment.create({
+      data: {
+        invoiceId: invoiceId.toString(),
+        userId: request.userId.toString(),
+        amount: request.amount,
+        packageType: 'video_tokens', // По умолчанию видео токены
+        description: request.description || `Покупка ${amount} токенов`,
+        paymentMethod: 'robokassa',
+        status: 'pending',
+        videoTokensGranted: Math.floor(request.amount * 10), // 1 рубль = 10 токенов
+        imageTokensGranted: 0,
+      },
+    });
+
+    // Формируем подпись (без пользовательских параметров для избежания ошибки 29)
     const signature = this.generatePaymentSignature(
       amount,
       invoiceId.toString(),
-      request.userId,
+      undefined, // Временно убираем userId из подписи
       request.recurring,
     );
 
@@ -96,8 +115,8 @@ export class RobokassaService {
       OutSum: amount.toString(),
       InvoiceID: invoiceId.toString(),
       Description: `Покупка ${amount} токенов`,
-      SignatureValue: signature, // Используем SignatureValue
-      Shp_UserId: request.userId?.toString() || '', // Включаем ID пользователя
+      SignatureValue: signature,
+      // Shp_UserId: request.userId?.toString() || '', // Временно отключаем
       Culture: 'ru', // Локализация
     });
 
@@ -207,16 +226,8 @@ export class RobokassaService {
     userId?: number,
     isRecurring?: boolean,
   ): string {
-    // Базовая часть подписи: MerchantLogin:OutSum:InvoiceID
-    let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}`;
-
-    // Добавляем пользовательские параметры (если есть)
-    if (userId) {
-      signatureString += `:Shp_UserId=${userId}`;
-    }
-
-    // Добавляем пароль в конце
-    signatureString += `:${this.password1}`;
+    // Простая формула без пользовательских параметров: MerchantLogin:OutSum:InvoiceID:Password1
+    const signatureString = `${this.merchantLogin}:${amount}:${invoiceId}:${this.password1}`;
 
     this.logger.debug(
       `Payment signature string: ${signatureString.replace(this.password1, '***')}`,
@@ -274,17 +285,31 @@ export class RobokassaService {
   /**
    * Извлекает данные пользователя из callback'а
    */
-  extractUserDataFromCallback(data: RobokassaCallbackData): { userId: number } {
-    const userIdStr = data.Shp_UserId;
-
-    if (!userIdStr) {
-      throw new Error('Missing user ID in callback data');
+  async extractUserDataFromCallback(
+    data: RobokassaCallbackData,
+  ): Promise<{ userId: number }> {
+    // Пытаемся получить userId из Shp_UserId (если есть)
+    if (data.Shp_UserId) {
+      const userId = parseInt(data.Shp_UserId);
+      if (!isNaN(userId)) {
+        return { userId };
+      }
     }
 
-    const userId = parseInt(userIdStr);
+    // Если Shp_UserId нет, ищем в БД по invoiceId
+    const payment = await this.prisma.payment.findUnique({
+      where: {
+        invoiceId: data.InvId,
+      },
+    });
 
+    if (!payment) {
+      throw new Error(`Payment with invoice ${data.InvId} not found`);
+    }
+
+    const userId = parseInt(payment.userId);
     if (isNaN(userId)) {
-      throw new Error('Invalid user ID in callback data');
+      throw new Error('Invalid user ID in payment record');
     }
 
     return { userId };
