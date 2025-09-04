@@ -3834,13 +3834,13 @@ ${selectedPlan.recurring ? '• Автопродление каждый меся
 
 🎬 Video-ТОКЕНЫ:
 ▫️ 50 видео · 2240₽
-🔥 100 видео · 4256₽ · ~~4480₽~~ (-5%)
-🔥 250 видео · 9968₽ · ~~11200₽~~ (-11%)
+🔥 100 видео · 4256₽ · <s>4480₽</s> (-5%)
+🔥 250 видео · 9968₽ · <s>11200₽</s> (-11%)
 
 🖼️ Image-ТОКЕНЫ:
 ▫️ 100 изо · 449₽
-🔥 200 изо · 790₽ · ~~898₽~~ (-12%)
-🔥 500 изо · 1900₽ · ~~2245₽~~ (-15%)
+🔥 200 изо · 790₽ · <s>898₽</s> (-12%)
+🔥 500 изо · 1900₽ · <s>2245₽</s> (-15%)
 
 Покупай генерации, без подписок и ограничений.
     `;
@@ -3866,7 +3866,10 @@ ${selectedPlan.recurring ? '• Автопродление каждый меся
       ],
     };
 
-    this.bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    this.bot.sendMessage(chatId, text, {
+      reply_markup: keyboard,
+      parse_mode: 'HTML',
+    });
   }
 
   private handleCancelSubscription(chatId: number) {
