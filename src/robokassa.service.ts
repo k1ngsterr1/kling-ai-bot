@@ -20,6 +20,7 @@ export interface RobokassaCallbackData {
   OutSum: string;
   InvId: string;
   SignatureValue: string;
+  Shp_UserId?: string; // ID пользователя
   Fee?: string; // Комиссия
   EMail?: string; // Email плательщика
   PaymentMethod?: string; // Способ оплаты
@@ -96,8 +97,7 @@ export class RobokassaService {
       InvoiceID: invoiceId.toString(),
       Description: `Покупка ${amount} токенов`,
       SignatureValue: signature, // Используем SignatureValue
-      // Временно убираем Shp_userId для отладки ошибки 29
-      // Shp_userId: request.userId?.toString() || '',
+      Shp_UserId: request.userId?.toString() || '', // Включаем ID пользователя
       Culture: 'ru', // Локализация
     });
 
@@ -207,13 +207,14 @@ export class RobokassaService {
     userId?: number,
     isRecurring?: boolean,
   ): string {
-    // Простая формула без дополнительных параметров: MerchantLogin:OutSum:InvoiceID:Password1
-    let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}:${this.password1}`;
+    // Формула с дополнительными параметрами: MerchantLogin:OutSum:InvoiceID:Shp_UserId:Password1
+    let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}`;
 
-    // Временно убираем Shp параметры для отладки ошибки 29
-    // if (userId) {
-    //   signatureString += `:Shp_userId=${userId}`;
-    // }
+    if (userId) {
+      signatureString += `:Shp_UserId=${userId}`;
+    }
+
+    signatureString += `:${this.password1}`;
 
     this.logger.debug(
       `Payment signature string: ${signatureString.replace(this.password1, '***')}`,
