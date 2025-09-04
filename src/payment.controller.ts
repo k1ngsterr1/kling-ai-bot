@@ -209,7 +209,7 @@ export class PaymentController {
 
       // Извлекаем данные пользователя
       const { userId } =
-        this.robokassaService.extractUserDataFromCallback(data);
+        await this.robokassaService.extractUserDataFromCallback(data);
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
 
@@ -271,7 +271,7 @@ export class PaymentController {
 
       // Извлекаем данные пользователя
       const { userId } =
-        this.robokassaService.extractUserDataFromCallback(data);
+        await this.robokassaService.extractUserDataFromCallback(data);
       const amount = parseFloat(data.OutSum);
       const invoiceId = parseInt(data.InvId);
 
@@ -402,7 +402,7 @@ export class PaymentController {
   }
 
   private async processSuccessfulPayment(
-    userId: number,
+    userId: string,
     amount: number,
     invoiceId: number,
   ) {
@@ -437,7 +437,7 @@ export class PaymentController {
       // Для Robokassa платежей (помесячные) - обновляем подписку
       if (payment.paymentMethod === 'robokassa') {
         await this.prismaService.user.update({
-          where: { telegramId: userId.toString() },
+          where: { telegramId: userId },
           data: {
             videoTokens: { increment: videoTokens },
             imageTokens: { increment: imageTokens },
@@ -480,10 +480,10 @@ export class PaymentController {
     }
   }
 
-  private async ensureUserExists(userId: number): Promise<void> {
+  private async ensureUserExists(userId: string): Promise<void> {
     try {
       const existingUser = await this.prismaService.user.findUnique({
-        where: { telegramId: userId.toString() },
+        where: { telegramId: userId },
       });
 
       if (!existingUser) {
@@ -492,7 +492,7 @@ export class PaymentController {
         // Create a basic user record
         await this.prismaService.user.create({
           data: {
-            telegramId: userId.toString(),
+            telegramId: userId,
             username: null,
             firstName: null,
             lastName: null,
@@ -539,7 +539,7 @@ export class PaymentController {
   }
 
   private async updateUserBalance(
-    userId: number,
+    userId: string,
     videoTokens: number,
     imageTokens: number,
   ) {
@@ -550,7 +550,7 @@ export class PaymentController {
       );
 
       await this.prismaService.user.update({
-        where: { telegramId: userId.toString() },
+        where: { telegramId: userId },
         data: {
           videoTokens: {
             increment: videoTokens,
@@ -586,7 +586,7 @@ export class PaymentController {
   }
 
   private async notifyUserAboutPayment(
-    userId: number,
+    userId: string,
     amount: number,
     videoTokens: number,
     imageTokens: number,
@@ -617,7 +617,7 @@ export class PaymentController {
 
 Теперь вы можете создавать контент!`;
 
-      await this.telegramBotService.sendMessage(userId, message);
+      await this.telegramBotService.sendMessage(parseInt(userId), message);
     } catch (error) {
       this.logger.error('Error notifying user about payment:', error);
       // Не выбрасываем ошибку, так как платеж уже обработан
@@ -717,7 +717,7 @@ export class PaymentController {
   }
 
   private async processRecurringPayment(
-    userId: number,
+    userId: string,
     amount: number,
     invoiceId: number,
   ) {
@@ -732,14 +732,14 @@ export class PaymentController {
 
       // Обновляем токены пользователя в базе данных
       await this.prismaService.user.upsert({
-        where: { telegramId: userId.toString() },
+        where: { telegramId: userId },
         update: {
           videoTokens: { increment: videoTokens },
           imageTokens: { increment: imageTokens },
           updatedAt: new Date(),
         },
         create: {
-          telegramId: userId.toString(),
+          telegramId: userId,
           videoTokens: videoTokens,
           imageTokens: imageTokens,
           createdAt: new Date(),
@@ -769,7 +769,7 @@ export class PaymentController {
   }
 
   private async notifyUserAboutRecurringPayment(
-    userId: number,
+    userId: string,
     amount: number,
     videoTokens: number,
     imageTokens: number,
@@ -787,7 +787,7 @@ export class PaymentController {
 Отменить подписку можно в любой момент в настройках.
       `;
 
-      await this.telegramBotService.sendMessage(userId, message);
+      await this.telegramBotService.sendMessage(parseInt(userId), message);
     } catch (error) {
       this.logger.error('Error notifying user about recurring payment:', error);
     }

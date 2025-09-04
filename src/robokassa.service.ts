@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from './prisma.service';
 
 export interface RobokassaPaymentRequest {
   userId: number;
@@ -27,6 +28,7 @@ export interface RobokassaCallbackData {
   IncCurrLabel?: string; // Валюта к получению
   PreviousInvoiceID?: string; // Для рекуррентных платежей
   Recurring?: string; // Флаг рекуррентного платежа
+  Shp_UserId?: string; // Пользовательский параметр с ID пользователя
   [key: string]: string | undefined;
 }
 
@@ -50,7 +52,10 @@ export class RobokassaService {
   private readonly paymentUrl = 'https://auth.robokassa.ru/Merchant/Index.aspx';
   private readonly testMode: boolean;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
     this.merchantLogin =
       this.configService.get<string>('ROBOKASSA_MERCHANT_LOGIN') ||
       'kling_tgbot';
@@ -271,20 +276,32 @@ export class RobokassaService {
   /**
    * Извлекает данные пользователя из callback'а
    */
-  extractUserDataFromCallback(data: RobokassaCallbackData): { userId: number } {
+  async extractUserDataFromCallback(
+    data: RobokassaCallbackData,
+  ): Promise<{ userId: string }> {
+    // Сначала пытаемся получить userId из Shp_UserId (если доступен)
     const userIdStr = data.Shp_UserId;
 
-    if (!userIdStr) {
-      throw new Error('Missing user ID in callback data');
+    if (userIdStr) {
+      return { userId: userIdStr };
     }
 
-    const userId = parseInt(userIdStr);
-
-    if (isNaN(userId)) {
-      throw new Error('Invalid user ID in callback data');
+    // Если Shp_UserId недоступен, ищем по invoiceId в базе данных
+    const invoiceId = data.InvId;
+    if (!invoiceId) {
+      throw new Error('Missing invoice ID in callback data');
     }
 
-    return { userId };
+    const payment = await this.prisma.payment.findUnique({
+      where: { invoiceId },
+      select: { userId: true },
+    });
+
+    if (!payment) {
+      throw new Error(`Payment not found for invoice ID: ${invoiceId}`);
+    }
+
+    return { userId: payment.userId };
   }
 
   /**
