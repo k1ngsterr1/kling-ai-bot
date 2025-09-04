@@ -58,22 +58,25 @@ export class PaymentController {
       // Определяем цену и параметры тарифа
       const tariffConfig = {
         basic: {
-          price: 299,
-          videoTokens: 10,
-          imageTokens: 50,
-          description: 'Базовый тариф - 10 видео + 50 изображений',
-        },
-        premium: {
-          price: 599,
+          price: 1200,
           videoTokens: 25,
           imageTokens: 100,
-          description: 'Премиум тариф - 25 видео + 100 изображений',
+          description:
+            'СТАРТ - 25 видео + 100 изображений · идеален для тестирования',
+        },
+        premium: {
+          price: 2230,
+          videoTokens: 50,
+          imageTokens: 100,
+          description:
+            'ПРОДВИНУТЫЙ - 50 видео + 100 изображений · самый популярный вариант',
         },
         unlimited: {
-          price: 1299,
+          price: 4320,
           videoTokens: 100,
-          imageTokens: 500,
-          description: 'Безлимитный тариф - 100 видео + 500 изображений',
+          imageTokens: 200,
+          description:
+            'ПРОФИ - 100 видео + 200 изображений · приоритетная очередь',
         },
       };
 
@@ -132,6 +135,108 @@ export class PaymentController {
       };
     } catch (error) {
       this.logger.error('Error creating tariff payment:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('create-token-package')
+  async createTokenPackagePayment(
+    @Body()
+    request: {
+      userId: number;
+      packageType: 'video' | 'image';
+      packageSize: 'small' | 'medium' | 'large';
+    },
+  ) {
+    try {
+      this.logger.log(
+        `Creating token package payment for user ${request.userId}: ${request.packageType} ${request.packageSize}`,
+      );
+
+      // Определяем цену и параметры пакета
+      const tokenPackages = {
+        video: {
+          small: {
+            price: 2240,
+            tokens: 50,
+            description: '50 видео токенов',
+          },
+          medium: {
+            price: 4256,
+            tokens: 100,
+            description: '100 видео токенов (скидка 5%)',
+          },
+          large: {
+            price: 9968,
+            tokens: 250,
+            description: '250 видео токенов (скидка 11%)',
+          },
+        },
+        image: {
+          small: {
+            price: 449,
+            tokens: 100,
+            description: '100 изображений',
+          },
+          medium: {
+            price: 790,
+            tokens: 200,
+            description: '200 изображений (скидка 12%)',
+          },
+          large: {
+            price: 1900,
+            tokens: 500,
+            description: '500 изображений (скидка 15%)',
+          },
+        },
+      };
+
+      const packageInfo =
+        tokenPackages[request.packageType][request.packageSize];
+      if (!packageInfo) {
+        throw new Error(
+          `Unknown package: ${request.packageType} ${request.packageSize}`,
+        );
+      }
+
+      // Создаем запрос на оплату
+      const paymentRequest = {
+        userId: request.userId,
+        amount: packageInfo.price,
+        packageType: `${request.packageType}_tokens` as
+          | 'video_tokens'
+          | 'image_tokens',
+        description: packageInfo.description,
+        recurring: false,
+      };
+
+      const result =
+        await this.robokassaService.createPaymentUrl(paymentRequest);
+
+      // Сохраняем информацию о платеже
+      await this.savePaymentInfo(paymentRequest, result.invoiceId);
+
+      this.logger.log(
+        `Token package payment created for user ${request.userId}, invoice: ${result.invoiceId}`,
+      );
+
+      return {
+        success: true,
+        paymentUrl: result.paymentUrl,
+        invoiceId: result.invoiceId,
+        amount: packageInfo.price,
+        package: {
+          type: request.packageType,
+          size: request.packageSize,
+          tokens: packageInfo.tokens,
+          description: packageInfo.description,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error creating token package payment:', error);
       return {
         success: false,
         error: error.message,
@@ -429,9 +534,70 @@ export class PaymentController {
 
   private async savePaymentInfo(request: PaymentRequest, invoiceId: number) {
     try {
-      // Здесь можно сохранить дополнительную информацию о платеже в базе данных
+      // Определяем количество токенов на основе типа пакета и суммы
+      let videoTokens = 0;
+      let imageTokens = 0;
+      let description = request.description;
+
+      if (request.packageType === 'video_tokens') {
+        // Пакеты видео токенов
+        if (request.amount === 2240) {
+          videoTokens = 50;
+          description = '50 видео токенов';
+        } else if (request.amount === 4256) {
+          videoTokens = 100;
+          description = '100 видео токенов (скидка 5%)';
+        } else if (request.amount === 9968) {
+          videoTokens = 250;
+          description = '250 видео токенов (скидка 11%)';
+        } else {
+          // Используем логику расчета токенов
+          const calculated = this.calculateTokens(request.amount);
+          videoTokens = calculated.videoTokens;
+        }
+      } else if (request.packageType === 'image_tokens') {
+        // Пакеты изображений
+        if (request.amount === 449) {
+          imageTokens = 100;
+          description = '100 изображений';
+        } else if (request.amount === 790) {
+          imageTokens = 200;
+          description = '200 изображений (скидка 12%)';
+        } else if (request.amount === 1900) {
+          imageTokens = 500;
+          description = '500 изображений (скидка 15%)';
+        } else {
+          // Используем логику расчета токенов
+          const calculated = this.calculateTokens(request.amount);
+          imageTokens = calculated.imageTokens;
+        }
+      } else {
+        // Для других типов используем стандартную логику
+        const calculated = this.calculateTokens(request.amount);
+        videoTokens = calculated.videoTokens;
+        imageTokens = calculated.imageTokens;
+      }
+
+      // Сохраняем информацию о платеже в базе данных
+      await this.prismaService.payment.create({
+        data: {
+          userId: request.userId.toString(),
+          amount: request.amount,
+          invoiceId: invoiceId.toString(),
+          status: 'pending',
+          packageType: request.packageType,
+          description: description,
+          paymentMethod: 'robokassa',
+          subscriptionDuration: 0, // Обычные пакеты не имеют срока действия
+          isRecurring: false,
+          recurringFrequency: null,
+          videoTokensGranted: videoTokens,
+          imageTokensGranted: imageTokens,
+        },
+      });
+
       this.logger.log(
-        `Payment info already saved for invoice ${invoiceId} in handleBuyPackage`,
+        `Payment info saved for invoice ${invoiceId}: ${videoTokens} video tokens, ${imageTokens} image tokens`,
       );
     } catch (error) {
       this.logger.error('Error saving payment info:', error);
@@ -559,20 +725,40 @@ export class PaymentController {
     videoTokens: number;
     imageTokens: number;
   } {
-    // Примерная логика расчета токенов
-    // Адаптируйте под ваши тарифы
-    if (amount >= 1000) {
-      // Premium package
+    // Логика расчета токенов на основе суммы платежа
+
+    // Видео токены
+    if (amount === 2240) {
+      return { videoTokens: 50, imageTokens: 0 };
+    } else if (amount === 4256) {
+      return { videoTokens: 100, imageTokens: 0 };
+    } else if (amount === 9968) {
+      return { videoTokens: 250, imageTokens: 0 };
+    }
+
+    // Изображения
+    else if (amount === 449) {
+      return { videoTokens: 0, imageTokens: 100 };
+    } else if (amount === 790) {
+      return { videoTokens: 0, imageTokens: 200 };
+    } else if (amount === 1900) {
+      return { videoTokens: 0, imageTokens: 500 };
+    }
+
+    // Тарифы (подписки)
+    else if (amount === 1200) {
+      return { videoTokens: 25, imageTokens: 100 };
+    } else if (amount === 2230) {
       return { videoTokens: 50, imageTokens: 100 };
-    } else if (amount >= 500) {
-      // Standard package
-      return { videoTokens: 20, imageTokens: 50 };
-    } else if (amount >= 100) {
-      // Basic package
-      return { videoTokens: 5, imageTokens: 15 };
-    } else {
-      // Минимальный пакет
-      return { videoTokens: 1, imageTokens: 3 };
+    } else if (amount === 4320) {
+      return { videoTokens: 100, imageTokens: 200 };
+    }
+
+    // Дефолтная логика для неизвестных сумм
+    else {
+      const videoTokens = Math.floor(amount / 45); // Примерно 45 руб за видео токен
+      const imageTokens = Math.floor(amount / 4.5); // Примерно 4.5 руб за изображение
+      return { videoTokens, imageTokens };
     }
   }
 
@@ -764,20 +950,28 @@ export class PaymentController {
         `Processing recurring payment for user ${userId}: ${amount} RUB`,
       );
 
-      // Для рекуррентных платежей обычно выдается фиксированное количество токенов
-      const videoTokens = 50; // Примерные токены для подписки
-      const imageTokens = 100;
+      // Получаем информацию о платеже из базы данных для определения количества токенов
+      const payment = await this.prismaService.payment.findUnique({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!payment) {
+        throw new Error(`Payment with invoice ${invoiceId} not found`);
+      }
+
+      const videoTokens = payment.videoTokensGranted;
+      const imageTokens = payment.imageTokensGranted;
 
       // Обновляем токены пользователя в базе данных
       await this.prismaService.user.upsert({
-        where: { telegramId: userId.toString() },
+        where: { telegramId: userId },
         update: {
           videoTokens: { increment: videoTokens },
           imageTokens: { increment: imageTokens },
           updatedAt: new Date(),
         },
         create: {
-          telegramId: userId.toString(),
+          telegramId: userId,
           videoTokens: videoTokens,
           imageTokens: imageTokens,
           createdAt: new Date(),
