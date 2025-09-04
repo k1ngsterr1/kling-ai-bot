@@ -37,77 +37,261 @@ export interface KlingImageResponse {
 export class KlingAiService implements OnModuleInit {
   private readonly logger = new Logger(KlingAiService.name);
   private httpClient: AxiosInstance;
-  private accessKey: string;
-  private secretKey: string;
 
-  // JWT token caching
+  // Множественные API ключи
+  private currentApiKey: {
+    id: number;
+    accessKey: string;
+    secretKey: string;
+    name: string;
+    priority: number;
+    isActive: boolean;
+    isAvailable: boolean;
+    errorCount: number;
+    requestCount: number;
+    lastUsed: Date | null;
+  } | null = null;
+  private apiKeys: Array<{
+    id: number;
+    accessKey: string;
+    secretKey: string;
+    name: string;
+    priority: number;
+    isActive: boolean;
+    isAvailable: boolean;
+    errorCount: number;
+    requestCount: number;
+    lastUsed: Date | null;
+  }> = [];
+
+  // JWT token caching для текущего ключа
   private cachedJwtToken: string | null = null;
   private jwtTokenExpiry: number = 0;
+
+  // Настройки для автоматического переключения
+  private readonly MAX_ERRORS_BEFORE_SWITCH = 3; // Максимум ошибок перед переключением
+  private readonly API_RECOVERY_TIME = 30 * 60 * 1000; // 30 минут для восстановления API
+  private readonly REQUEST_TIMEOUT = 30000; // 30 секунд таймаут
 
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
-    this.loadKlingConfig();
     this.initializeHttpClient();
   }
 
   async onModuleInit() {
-    await this.loadKlingConfig();
+    await this.loadApiKeys();
     this.initializeHttpClient();
 
     // Test API keys on startup
-    if (this.accessKey && this.secretKey) {
-      const testResult = await this.testApiKeys();
+    if (this.currentApiKey) {
+      const testResult = await this.testCurrentApiKey();
       if (!testResult.valid) {
         this.logger.error('🚫 Kling API keys test failed:', testResult.error);
-        this.logger.error(
-          'Please check and update your API keys via /admin panel',
-        );
+        await this.switchToNextAvailableApiKey();
       }
     }
   }
 
-  private async loadKlingConfig() {
+  /**
+   * Загружает все доступные API ключи из базы данных
+   */
+  private async loadApiKeys() {
     try {
-      // Load from database ONLY
-      const config = await this.prisma.klingConfig.findFirst({
-        orderBy: { updatedAt: 'desc' },
+      const configs = await this.prisma.klingConfig.findMany({
+        where: { isActive: true },
+        orderBy: [
+          { priority: 'desc' }, // Сначала по приоритету
+          { isDefault: 'desc' }, // Потом по дефолтности
+          { updatedAt: 'desc' }, // Потом по времени обновления
+        ],
       });
 
-      if (config && config.accessKey && config.secretKey) {
-        this.accessKey = config.accessKey;
-        this.secretKey = config.secretKey;
-        this.logger.log('✅ Using Kling keys from database');
-        this.logger.log(`Access Key: ${this.accessKey.substring(0, 8)}...`);
-        this.logger.log(`Secret Key: ${this.secretKey.substring(0, 8)}...`);
+      this.apiKeys = configs.map((config) => ({
+        id: config.id,
+        accessKey: config.accessKey,
+        secretKey: config.secretKey,
+        name: config.name,
+        priority: config.priority,
+        isActive: config.isActive,
+        isAvailable: config.isAvailable,
+        errorCount: config.errorCount,
+        requestCount: config.requestCount,
+        lastUsed: config.lastUsed,
+      }));
+
+      if (this.apiKeys.length > 0) {
+        // Выбираем первый доступный ключ
+        await this.selectBestApiKey();
+        this.logger.log(
+          `✅ Loaded ${this.apiKeys.length} API key(s) from database`,
+        );
+        this.logger.log(`🎯 Using API key: ${this.currentApiKey?.name}`);
       } else {
-        this.logger.warn('❌ No Kling API keys found in database!');
+        this.logger.warn('❌ No active Kling API keys found in database!');
         this.logger.warn(
           'Please configure API keys using admin panel (/admin)',
         );
-        this.accessKey = '';
-        this.secretKey = '';
+        this.currentApiKey = null;
       }
     } catch (error) {
-      this.logger.error('Error loading Kling config from database:', error);
-      this.accessKey = '';
-      this.secretKey = '';
+      this.logger.error('Error loading Kling API keys from database:', error);
+      this.currentApiKey = null;
     }
   }
 
-  private async saveKlingConfig() {
+  /**
+   * Выбирает лучший доступный API ключ
+   */
+  private async selectBestApiKey() {
+    if (this.apiKeys.length === 0) {
+      this.currentApiKey = null;
+      return;
+    }
+
+    // Находим доступные ключи (без ошибок или с истекшим временем восстановления)
+    const availableKeys: typeof this.apiKeys = [];
+    const now = new Date();
+
+    for (const key of this.apiKeys) {
+      const config = await this.prisma.klingConfig.findUnique({
+        where: { id: key.id },
+      });
+
+      if (config && config.isAvailable) {
+        // Если ключ помечен как недоступный, проверяем, прошло ли время восстановления
+        if (
+          config.errorCount >= this.MAX_ERRORS_BEFORE_SWITCH &&
+          config.lastUsed
+        ) {
+          const timeSinceLastError = now.getTime() - config.lastUsed.getTime();
+          if (timeSinceLastError > this.API_RECOVERY_TIME) {
+            // Время восстановления прошло, сбрасываем счетчик ошибок
+            await this.resetApiKeyErrors(key.id);
+            availableKeys.push(key);
+          }
+        } else {
+          availableKeys.push(key);
+        }
+      }
+    }
+
+    if (availableKeys.length > 0) {
+      // Сортируем по приоритету и выбираем лучший
+      availableKeys.sort((a, b) => b.priority - a.priority);
+      this.currentApiKey = availableKeys[0];
+    } else {
+      // Если нет доступных ключей, берем первый из списка и сбрасываем его ошибки
+      this.currentApiKey = this.apiKeys[0];
+      await this.resetApiKeyErrors(this.currentApiKey.id);
+      this.logger.warn(
+        '🔄 No available API keys, using first key and resetting errors',
+      );
+    }
+
+    // Сбрасываем JWT токен при смене ключа
+    this.cachedJwtToken = null;
+    this.jwtTokenExpiry = 0;
+  }
+
+  /**
+   * Переключается на следующий доступный API ключ
+   */
+  private async switchToNextAvailableApiKey(): Promise<boolean> {
+    const currentKeyId = this.currentApiKey?.id;
+
+    // Помечаем текущий ключ как недоступный
+    if (currentKeyId) {
+      await this.markApiKeyAsUnavailable(currentKeyId);
+    }
+
+    // Ищем следующий доступный ключ
+    await this.selectBestApiKey();
+
+    const switched = this.currentApiKey?.id !== currentKeyId;
+    if (switched && this.currentApiKey) {
+      this.logger.log(`🔄 Switched to API key: ${this.currentApiKey.name}`);
+    }
+
+    return switched;
+  }
+
+  /**
+   * Помечает API ключ как недоступный из-за ошибок
+   */
+  private async markApiKeyAsUnavailable(keyId: number) {
     try {
-      // Delete old configs and create new one
-      await this.prisma.klingConfig.deleteMany({});
-      await this.prisma.klingConfig.create({
+      await this.prisma.klingConfig.update({
+        where: { id: keyId },
         data: {
-          accessKey: this.accessKey,
-          secretKey: this.secretKey,
+          errorCount: { increment: 1 },
+          lastUsed: new Date(),
+          isAvailable: false,
         },
       });
     } catch (error) {
-      this.logger.error('Error saving Kling config:', error);
+      this.logger.error('Error marking API key as unavailable:', error);
+    }
+  }
+
+  /**
+   * Сбрасывает счетчик ошибок API ключа
+   */
+  private async resetApiKeyErrors(keyId: number) {
+    try {
+      await this.prisma.klingConfig.update({
+        where: { id: keyId },
+        data: {
+          errorCount: 0,
+          isAvailable: true,
+        },
+      });
+    } catch (error) {
+      this.logger.error('Error resetting API key errors:', error);
+    }
+  }
+
+  /**
+   * Обновляет статистику использования API ключа
+   */
+  private async updateApiKeyUsage(keyId: number, success: boolean) {
+    try {
+      const updateData: any = {
+        lastUsed: new Date(),
+        requestCount: { increment: 1 },
+      };
+
+      if (success) {
+        // При успешном запросе сбрасываем счетчик ошибок
+        updateData.errorCount = 0;
+        updateData.isAvailable = true;
+      } else {
+        // При ошибке увеличиваем счетчик
+        updateData.errorCount = { increment: 1 };
+      }
+
+      const updated = await this.prisma.klingConfig.update({
+        where: { id: keyId },
+        data: updateData,
+      });
+
+      // Если достигли лимита ошибок, помечаем ключ как недоступный
+      if (!success && updated.errorCount >= this.MAX_ERRORS_BEFORE_SWITCH) {
+        await this.prisma.klingConfig.update({
+          where: { id: keyId },
+          data: { isAvailable: false },
+        });
+
+        this.logger.warn(
+          `🚫 API key ${this.currentApiKey?.name} marked as unavailable due to ${updated.errorCount} errors`,
+        );
+
+        // Пытаемся переключиться на другой ключ
+        await this.switchToNextAvailableApiKey();
+      }
+    } catch (error) {
+      this.logger.error('Error updating API key usage:', error);
     }
   }
 
@@ -210,6 +394,10 @@ export class KlingAiService implements OnModuleInit {
   }
 
   private generateJwtToken(): string {
+    if (!this.currentApiKey) {
+      throw new Error('No API key available for JWT generation');
+    }
+
     const now = Math.floor(Date.now() / 1000);
 
     // Check if we have a valid cached token (with 5 minute buffer before expiry)
@@ -227,15 +415,18 @@ export class KlingAiService implements OnModuleInit {
     // Create payload according to Kling AI docs
     const expiry = now + 1800; // Expire in 30 minutes
     const payload = {
-      iss: this.accessKey,
+      iss: this.currentApiKey.accessKey,
       exp: expiry,
       nbf: now, // Not before now
     };
 
-    this.logger.debug('Generating new JWT token');
+    this.logger.debug(
+      'Generating new JWT token for API key:',
+      this.currentApiKey.name,
+    );
     this.logger.debug('JWT Header:', header);
     this.logger.debug('JWT Payload:', {
-      iss: this.accessKey?.substring(0, 8) + '...',
+      iss: this.currentApiKey.accessKey?.substring(0, 8) + '...',
       exp: payload.exp,
       nbf: payload.nbf,
       currentTime: now,
@@ -243,7 +434,7 @@ export class KlingAiService implements OnModuleInit {
     });
 
     // Create JWT token
-    const token = jwt.sign(payload, this.secretKey, {
+    const token = jwt.sign(payload, this.currentApiKey.secretKey, {
       algorithm: 'HS256',
       header: header,
       noTimestamp: true, // Убираем автоматическое поле iat
@@ -269,10 +460,10 @@ export class KlingAiService implements OnModuleInit {
     return token;
   }
 
-  // Test API keys validity
-  async testApiKeys(): Promise<{ valid: boolean; error?: string }> {
-    if (!this.accessKey || !this.secretKey) {
-      return { valid: false, error: 'API keys not configured' };
+  // Test current API key validity
+  async testCurrentApiKey(): Promise<{ valid: boolean; error?: string }> {
+    if (!this.currentApiKey) {
+      return { valid: false, error: 'No API key configured' };
     }
 
     try {
@@ -282,35 +473,52 @@ export class KlingAiService implements OnModuleInit {
       );
 
       if (response.status === 200) {
-        this.logger.log('✅ API keys are valid - test request successful');
+        this.logger.log(
+          `✅ API key ${this.currentApiKey.name} is valid - test request successful`,
+        );
+        await this.updateApiKeyUsage(this.currentApiKey.id, true);
         return { valid: true };
       } else {
-        this.logger.warn(`⚠️ Unexpected response status: ${response.status}`);
+        this.logger.warn(
+          `⚠️ Unexpected response status: ${response.status} for key ${this.currentApiKey.name}`,
+        );
+        await this.updateApiKeyUsage(this.currentApiKey.id, false);
         return { valid: false, error: `Unexpected status: ${response.status}` };
       }
     } catch (error) {
+      await this.updateApiKeyUsage(this.currentApiKey.id, false);
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         const message = error.response?.data?.message || error.message;
 
         if (status === 401) {
-          this.logger.error('❌ API keys are INVALID - Authentication failed');
+          this.logger.error(
+            `❌ API key ${this.currentApiKey.name} is INVALID - Authentication failed`,
+          );
           return { valid: false, error: `Authentication failed: ${message}` };
         } else {
-          this.logger.warn(
-            `⚠️ API test failed with status ${status}: ${message}`,
+          this.logger.error(
+            `❌ API request failed for key ${this.currentApiKey.name}:`,
+            error.message,
           );
-          return { valid: false, error: `API error ${status}: ${message}` };
+          return { valid: false, error: message };
         }
       }
 
-      this.logger.error('❌ API test failed:', error.message);
-      return { valid: false, error: error.message };
+      return {
+        valid: false,
+        error: error.message,
+      };
     }
   }
 
+  // Test API keys validity (legacy method for backwards compatibility)
+  async testApiKeys(): Promise<{ valid: boolean; error?: string }> {
+    return this.testCurrentApiKey();
+  }
+
   async generateVideo(request: KlingVideoRequest): Promise<KlingVideoResponse> {
-    if (!this.accessKey || !this.secretKey) {
+    if (!this.currentApiKey) {
       this.logger.error('❌ Kling API keys not configured!');
       throw new Error(
         'API keys not configured. Please set them via admin panel.',
@@ -531,7 +739,7 @@ export class KlingAiService implements OnModuleInit {
   // Image generation methods
   async generateImage(request: KlingImageRequest): Promise<KlingImageResponse> {
     // Check if API keys are configured
-    if (!this.accessKey || !this.secretKey) {
+    if (!this.currentApiKey) {
       this.logger.error('❌ Kling API keys not configured!');
       throw new Error(
         'API keys not configured. Please set them via admin panel.',
@@ -539,11 +747,12 @@ export class KlingAiService implements OnModuleInit {
     }
 
     this.logger.log(
-      `Starting image generation with prompt: "${request.prompt}"`,
+      `🎨 Generating image using ${this.currentApiKey.name} with prompt: "${request.prompt}"`,
     );
 
-    this.logger.log(`Using Access Key: ${this.accessKey?.substring(0, 8)}...`);
-    this.logger.log(`Using Secret Key: ${this.secretKey?.substring(0, 8)}...`);
+    this.logger.log(
+      `Using API Key: ${this.currentApiKey.accessKey?.substring(0, 8)}...`,
+    );
 
     const payload = {
       model: 'kling-v-1',
@@ -806,43 +1015,144 @@ export class KlingAiService implements OnModuleInit {
     return Math.random() > 0.5;
   }
 
-  // Admin methods for updating API keys
+  // Admin methods for managing API keys
+  async addApiKey(
+    name: string,
+    accessKey: string,
+    secretKey: string,
+    priority: number = 1,
+  ): Promise<void> {
+    this.logger.log(`Adding new API key: ${name}`);
+
+    await this.prisma.klingConfig.create({
+      data: {
+        name,
+        accessKey,
+        secretKey,
+        priority,
+        isActive: true,
+        isAvailable: true,
+        errorCount: 0,
+        requestCount: 0,
+        lastUsed: new Date(),
+      },
+    });
+
+    // Reload API keys
+    await this.loadApiKeys();
+    this.logger.log(`✅ API key "${name}" added successfully`);
+  }
+
+  async updateApiKey(
+    id: number,
+    updates: Partial<{
+      name: string;
+      accessKey: string;
+      secretKey: string;
+      priority: number;
+      isActive: boolean;
+    }>,
+  ): Promise<void> {
+    this.logger.log(`Updating API key with ID: ${id}`);
+
+    await this.prisma.klingConfig.update({
+      where: { id },
+      data: updates,
+    });
+
+    // Reload API keys
+    await this.loadApiKeys();
+    this.logger.log(`✅ API key updated successfully`);
+  }
+
+  async removeApiKey(id: number): Promise<void> {
+    this.logger.log(`Removing API key with ID: ${id}`);
+
+    await this.prisma.klingConfig.delete({
+      where: { id },
+    });
+
+    // Reload API keys
+    await this.loadApiKeys();
+    this.logger.log(`✅ API key removed successfully`);
+  }
+
+  async getAllApiKeys(): Promise<any[]> {
+    return this.apiKeys.map((key) => ({
+      id: key.id,
+      name: key.name,
+      accessKey: key.accessKey?.substring(0, 8) + '...',
+      priority: key.priority,
+      isActive: key.isActive,
+      isAvailable: key.isAvailable,
+      errorCount: key.errorCount,
+      requestCount: key.requestCount,
+      lastUsed: key.lastUsed,
+    }));
+  }
+
+  getCurrentApiKey(): any | null {
+    if (!this.currentApiKey) return null;
+
+    return {
+      id: this.currentApiKey.id,
+      name: this.currentApiKey.name,
+      accessKey: this.currentApiKey.accessKey?.substring(0, 8) + '...',
+      priority: this.currentApiKey.priority,
+      isActive: this.currentApiKey.isActive,
+      isAvailable: this.currentApiKey.isAvailable,
+      errorCount: this.currentApiKey.errorCount,
+      requestCount: this.currentApiKey.requestCount,
+      lastUsed: this.currentApiKey.lastUsed,
+    };
+  }
+
+  // Legacy methods for backwards compatibility (deprecated)
   async updateAccessKey(newAccessKey: string): Promise<void> {
-    this.logger.log(
-      `Updating access key: ${newAccessKey.substring(0, 6)}***${newAccessKey.substring(newAccessKey.length - 4)}`,
+    this.logger.warn(
+      '⚠️ updateAccessKey is deprecated. Use addApiKey or updateApiKey instead.',
     );
-    this.accessKey = newAccessKey;
-    // Clear JWT cache when keys change
-    this.cachedJwtToken = null;
-    this.jwtTokenExpiry = 0;
-    await this.saveKlingConfig(); // Save to database
-    this.initializeHttpClient(); // Reinitialize with new keys
+    if (this.currentApiKey) {
+      await this.updateApiKey(this.currentApiKey.id, {
+        accessKey: newAccessKey,
+      });
+    }
   }
 
   async updateSecretKey(newSecretKey: string): Promise<void> {
-    this.logger.log(
-      `Updating secret key: ${newSecretKey.substring(0, 6)}***${newSecretKey.substring(newSecretKey.length - 4)}`,
+    this.logger.warn(
+      '⚠️ updateSecretKey is deprecated. Use addApiKey or updateApiKey instead.',
     );
-    this.secretKey = newSecretKey;
-    // Clear JWT cache when keys change
-    this.cachedJwtToken = null;
-    this.jwtTokenExpiry = 0;
-    await this.saveKlingConfig(); // Save to database
-    this.initializeHttpClient(); // Reinitialize with new keys
+    if (this.currentApiKey) {
+      await this.updateApiKey(this.currentApiKey.id, {
+        secretKey: newSecretKey,
+      });
+    }
   }
 
   getCurrentAccessKey(): string {
-    return this.accessKey;
+    this.logger.warn(
+      '⚠️ getCurrentAccessKey is deprecated. Use getCurrentApiKey instead.',
+    );
+    return this.currentApiKey?.accessKey || '';
   }
 
   getCurrentSecretKey(): string {
-    return this.secretKey;
+    this.logger.warn(
+      '⚠️ getCurrentSecretKey is deprecated. Use getCurrentApiKey instead.',
+    );
+    return this.currentApiKey?.secretKey || '';
   }
 
   updateBothKeys(newAccessKey: string, newSecretKey: string): void {
-    this.logger.log('Updating both API keys');
-    this.accessKey = newAccessKey;
-    this.secretKey = newSecretKey;
-    this.initializeHttpClient(); // Reinitialize with new keys
+    this.logger.warn(
+      '⚠️ updateBothKeys is deprecated. Use addApiKey or updateApiKey instead.',
+    );
+    if (this.currentApiKey) {
+      this.updateApiKey(this.currentApiKey.id, {
+        accessKey: newAccessKey,
+        secretKey: newSecretKey,
+      });
+    }
   }
 }

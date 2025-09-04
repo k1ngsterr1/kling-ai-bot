@@ -84,8 +84,21 @@ model Image {
 
 model KlingConfig {
   id        Int      @id @default(autoincrement())
+  name      String   // Название для идентификации ключей (например, "Primary", "Secondary", "Backup")
   accessKey String
   secretKey String
+  isActive  Boolean  @default(true) // Активен ли этот ключ
+  isDefault Boolean  @default(false) // Используется ли по умолчанию
+  priority  Int      @default(0) // Приоритет использования (чем выше, тем приоритетнее)
+  
+  // Поля для отслеживания состояния и нагрузки
+  lastUsed     DateTime? // Когда последний раз использовался
+  errorCount   Int      @default(0) // Количество ошибок подряд
+  isAvailable  Boolean  @default(true) // Доступен ли ключ (false если много ошибок)
+  requestCount Int      @default(0) // Общее количество запросов
+  dailyLimit   Int?     // Дневной лимит запросов (если известен)
+  
+  createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
   @@map("kling_config")
