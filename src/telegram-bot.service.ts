@@ -170,6 +170,12 @@ export class TelegramBotService {
       this.handleAdminCommand(chatId, msg.from?.id);
     });
 
+    // Admin only command for adding new API key pair
+    this.bot.onText(/\/add_api_key/, (msg) => {
+      const chatId = msg.chat.id;
+      this.handleAddApiKeyCommand(chatId, msg.from?.id, msg.text);
+    });
+
     // Handle get image command with ID parameter
     this.bot.onText(/\/getimg (.+)/, (msg, match) => {
       const chatId = msg.chat.id;
@@ -821,6 +827,13 @@ ${subscriptionStatus}${subscriptionDetails}
         break;
       case 'admin_change_access_key':
         this.handleChangeAccessKey(
+          chatId,
+          callbackQuery.from?.id,
+          callbackQuery.message?.message_id,
+        );
+        break;
+      case 'admin_create_new_pair':
+        this.handleCreateNewApiKeyPair(
           chatId,
           callbackQuery.from?.id,
           callbackQuery.message?.message_id,
@@ -5228,6 +5241,7 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
 Здесь вы можете просматривать и изменять API ключи для Kling AI:
 
 🔍 Просмотр текущих ключей
+➕ Создание новой пары ключей
 🔧 Изменение Access Key
 🔧 Изменение Secret Key
 
@@ -5240,6 +5254,12 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
           {
             text: '👁️ Просмотреть текущие ключи',
             callback_data: 'admin_view_current_keys',
+          },
+        ],
+        [
+          {
+            text: '➕ Создать новую пару',
+            callback_data: 'admin_create_new_pair',
           },
         ],
         [
@@ -5271,7 +5291,7 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
     }
   }
 
-  private handleViewCurrentKeys(
+  private async handleViewCurrentKeys(
     chatId: number,
     userId?: number,
     messageId?: number,
@@ -5284,64 +5304,95 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
       return;
     }
 
-    // Get current keys from KlingAiService
-    const currentAccessKey =
-      this.klingAiService.getCurrentAccessKey() || 'Не установлен';
-    const currentSecretKey =
-      this.klingAiService.getCurrentSecretKey() || 'Не установлен';
+    try {
+      // Get all API keys from KlingAiService
+      const allApiKeys = await this.klingAiService.getAllApiKeys();
+      const currentApiKey = this.klingAiService.getCurrentApiKey();
 
-    // Mask the keys for security (show only first 6 and last 4 characters)
-    const maskedAccessKey =
-      currentAccessKey.length > 10
-        ? `${currentAccessKey.substring(0, 6)}***${currentAccessKey.substring(currentAccessKey.length - 4)}`
-        : currentAccessKey;
+      let text = `
+👁️ ВСЕ API КЛЮЧИ KLING AI
 
-    const maskedSecretKey =
-      currentSecretKey.length > 10
-        ? `${currentSecretKey.substring(0, 6)}***${currentSecretKey.substring(currentSecretKey.length - 4)}`
-        : currentSecretKey;
+📊 Всего ключей: ${allApiKeys.length}
+${currentApiKey ? `🎯 Активный: ${currentApiKey.name}` : '❌ Нет активного ключа'}
 
-    const text = `
-👁️ ТЕКУЩИЕ API КЛЮЧИ KLING AI
+`;
 
-🔑 Access Key: \`${maskedAccessKey}\`
-🔐 Secret Key: \`${maskedSecretKey}\`
+      if (allApiKeys.length === 0) {
+        text += `❌ API ключи не настроены
 
-⚠️ Ключи частично скрыты для безопасности
-    `;
+Используйте команду /add_api_key для добавления новой пары ключей.`;
+      } else {
+        allApiKeys.forEach((key, index) => {
+          const isActive = currentApiKey && currentApiKey.id === key.id;
+          const statusIcon = isActive ? '🟢' : key.isAvailable ? '🟡' : '🔴';
+          const activeText = isActive ? ' [АКТИВНЫЙ]' : '';
 
-    const keyboard = {
-      inline_keyboard: [
-        [
-          {
-            text: '🔧 Изменить Access Key',
-            callback_data: 'admin_change_access_key',
-          },
+          text += `
+${statusIcon} **${key.name}**${activeText}
+   🆔 ID: ${key.id}
+   🔑 Access: ${key.accessKey}
+   � Приоритет: ${key.priority}
+   ⚡ Запросов: ${key.requestCount}
+   ❌ Ошибок: ${key.errorCount}
+   📅 Последнее использование: ${key.lastUsed ? new Date(key.lastUsed).toLocaleString('ru-RU') : 'Никогда'}
+   ${key.isActive ? '✅ Активен' : '⏸️ Неактивен'}
+   ${key.isAvailable ? '🟢 Доступен' : '🔴 Недоступен'}
+`;
+        });
+      }
+
+      text += `
+⚠️ Ключи частично скрыты для безопасности`;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: '➕ Добавить новую пару',
+              callback_data: 'admin_create_new_pair',
+            },
+          ],
+          [
+            {
+              text: '🔧 Изменить Access Key',
+              callback_data: 'admin_change_access_key',
+            },
+          ],
+          [
+            {
+              text: '🔧 Изменить Secret Key',
+              callback_data: 'admin_change_secret_key',
+            },
+          ],
+          [{ text: '◀️ Назад', callback_data: 'admin_api_keys' }],
         ],
-        [
-          {
-            text: '🔧 Изменить Secret Key',
-            callback_data: 'admin_change_secret_key',
-          },
-        ],
-        [{ text: '◀️ Назад', callback_data: 'admin_api_keys' }],
-      ],
-    };
+      };
 
-    if (messageId) {
-      // Update existing message
-      this.bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: keyboard,
-        parse_mode: 'Markdown',
-      });
-    } else {
-      // Send new message
-      this.bot.sendMessage(chatId, text, {
-        reply_markup: keyboard,
-        parse_mode: 'Markdown',
-      });
+      if (messageId) {
+        this.bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: keyboard,
+          parse_mode: 'Markdown',
+        });
+      } else {
+        this.bot.sendMessage(chatId, text, {
+          reply_markup: keyboard,
+          parse_mode: 'Markdown',
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error in handleViewCurrentKeys:', error);
+      const errorText = `❌ Ошибка при получении информации о ключах: ${error.message}`;
+
+      if (messageId) {
+        this.bot.editMessageText(errorText, {
+          chat_id: chatId,
+          message_id: messageId,
+        });
+      } else {
+        this.bot.sendMessage(chatId, errorText);
+      }
     }
   }
 
@@ -5911,6 +5962,195 @@ ${action === 'add' ? '➕' : '➖'} ${actionText.toUpperCase()} ТОКЕНЫ
     } catch (error) {
       this.logger.error('Error sending message:', error);
       throw error;
+    }
+  }
+
+  // Admin method for creating new API key pair
+  private handleCreateNewApiKeyPair(
+    chatId: number,
+    userId?: number,
+    messageId?: number,
+  ) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    const text = `
+➕ СОЗДАНИЕ НОВОЙ ПАРЫ API КЛЮЧЕЙ
+
+Для создания новой пары API ключей, пожалуйста:
+
+1️⃣ Сначала отправьте Access Key
+2️⃣ Затем отправьте Secret Key
+3️⃣ Опционально укажите имя для пары
+
+📝 Формат сообщения:
+\`/add_api_key\`
+\`Access Key\`
+\`Secret Key\`
+\`Имя пары (опционально)\`
+
+Пример:
+\`/add_api_key\`
+\`ak-xxx...\`
+\`sk-xxx...\`
+\`Основной ключ\`
+
+⚠️ Новые ключи будут автоматически протестированы перед сохранением!
+    `;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '◀️ Назад к API ключам', callback_data: 'admin_api_keys' }],
+      ],
+    };
+
+    if (messageId) {
+      this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: keyboard,
+        parse_mode: 'Markdown',
+      });
+    } else {
+      this.bot.sendMessage(chatId, text, {
+        reply_markup: keyboard,
+        parse_mode: 'Markdown',
+      });
+    }
+  }
+
+  // Handle /add_api_key command
+  private async handleAddApiKeyCommand(
+    chatId: number,
+    userId?: number,
+    messageText?: string,
+  ) {
+    if (!this.isAdmin(userId)) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ У вас нет прав для выполнения этой команды',
+      );
+      return;
+    }
+
+    if (!messageText) {
+      this.bot.sendMessage(
+        chatId,
+        '❌ Ошибка: не удалось получить текст сообщения',
+      );
+      return;
+    }
+
+    // Парсим сообщение
+    const lines = messageText
+      .trim()
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line);
+
+    if (lines.length < 3) {
+      const errorText = `
+❌ НЕВЕРНЫЙ ФОРМАТ
+
+Используйте следующий формат:
+\`/add_api_key\`
+\`Access Key\`
+\`Secret Key\`
+\`Имя пары (опционально)\`
+
+Пример:
+\`/add_api_key\`
+\`ak-xxx...\`
+\`sk-xxx...\`
+\`Основной ключ\`
+      `;
+
+      this.bot.sendMessage(chatId, errorText, { parse_mode: 'Markdown' });
+      return;
+    }
+
+    const accessKey = lines[1];
+    const secretKey = lines[2];
+    const customName = lines[3] || undefined;
+
+    // Показываем процесс
+    const processingMsg = await this.bot.sendMessage(
+      chatId,
+      '🧪 Тестирование новых API ключей...',
+    );
+
+    try {
+      // Сначала тестируем ключи
+      const testResult = await this.klingAiService.testNewApiKeyPair(
+        accessKey,
+        secretKey,
+      );
+
+      if (!testResult.valid) {
+        await this.bot.editMessageText(
+          `❌ ТЕСТ НЕ ПРОЙДЕН\n\nОшибка: ${testResult.error}\n\nПроверьте правильность ключей и попробуйте снова.`,
+          {
+            chat_id: chatId,
+            message_id: processingMsg.message_id,
+          },
+        );
+        return;
+      }
+
+      // Если тест прошел, создаем новую пару
+      await this.bot.editMessageText(
+        '✅ Тест пройден успешно! Создание новой пары...',
+        {
+          chat_id: chatId,
+          message_id: processingMsg.message_id,
+        },
+      );
+
+      const createResult = await this.klingAiService.createNewApiKeyPair(
+        accessKey,
+        secretKey,
+        customName,
+      );
+
+      if (createResult.success) {
+        const successText = `
+✅ ПАРА API КЛЮЧЕЙ СОЗДАНА УСПЕШНО!
+
+🆔 ID: ${createResult.id}
+📝 Имя: ${createResult.name}
+🔑 Access Key: ${accessKey.substring(0, 8)}...
+🔐 Secret Key: ${secretKey.substring(0, 8)}...
+
+Новая пара готова к использованию!
+        `;
+
+        await this.bot.editMessageText(successText, {
+          chat_id: chatId,
+          message_id: processingMsg.message_id,
+        });
+      } else {
+        await this.bot.editMessageText(
+          `❌ ОШИБКА ПРИ СОЗДАНИИ\n\nОшибка: ${createResult.error}`,
+          {
+            chat_id: chatId,
+            message_id: processingMsg.message_id,
+          },
+        );
+      }
+    } catch (error) {
+      this.logger.error('Error in handleAddApiKeyCommand:', error);
+      await this.bot.editMessageText(
+        `❌ ПРОИЗОШЛА ОШИБКА\n\nПодробности: ${error.message}`,
+        {
+          chat_id: chatId,
+          message_id: processingMsg.message_id,
+        },
+      );
     }
   }
 }

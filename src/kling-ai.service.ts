@@ -1091,6 +1091,196 @@ export class KlingAiService implements OnModuleInit {
     }));
   }
 
+  /**
+   * Создает новую пару API ключей с автоматической генерацией имени
+   */
+  async createNewApiKeyPair(
+    accessKey: string,
+    secretKey: string,
+    customName?: string,
+    priority: number = 1,
+  ): Promise<{ id: number; name: string; success: boolean; error?: string }> {
+    try {
+      // Проверяем, что ключи не пустые
+      if (!accessKey || !secretKey) {
+        throw new Error('Access Key и Secret Key не могут быть пустыми');
+      }
+
+      // Проверяем, что такой же ключ уже не существует
+      const existingKey = await this.prisma.klingConfig.findFirst({
+        where: {
+          OR: [{ accessKey: accessKey }, { secretKey: secretKey }],
+        },
+      });
+
+      if (existingKey) {
+        throw new Error('API ключ с такими данными уже существует');
+      }
+
+      // Генерируем имя если не указано
+      let name = customName;
+      if (!name) {
+        const keyCount = await this.prisma.klingConfig.count();
+        name = `API Key #${keyCount + 1}`;
+      }
+
+      // Проверяем уникальность имени
+      const existingNameKey = await this.prisma.klingConfig.findFirst({
+        where: { name },
+      });
+
+      if (existingNameKey) {
+        const timestamp = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace(/[:-]/g, '');
+        name = `${name}_${timestamp}`;
+      }
+
+      // Создаем новую пару
+      const newKey = await this.prisma.klingConfig.create({
+        data: {
+          name,
+          accessKey,
+          secretKey,
+          priority,
+          isActive: true,
+          isAvailable: true,
+          errorCount: 0,
+          requestCount: 0,
+          lastUsed: new Date(),
+        },
+      });
+
+      // Перезагружаем API ключи
+      await this.loadApiKeys();
+
+      this.logger.log(
+        `✅ Новая пара API ключей "${name}" успешно создана с ID: ${newKey.id}`,
+      );
+
+      return {
+        id: newKey.id,
+        name: newKey.name,
+        success: true,
+      };
+    } catch (error) {
+      this.logger.error(
+        '❌ Ошибка при создании новой пары API ключей:',
+        error.message,
+      );
+      return {
+        id: 0,
+        name: '',
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Тестирует новую пару API ключей перед сохранением
+   */
+  async testNewApiKeyPair(
+    accessKey: string,
+    secretKey: string,
+  ): Promise<{ valid: boolean; error?: string }> {
+    try {
+      // Проверяем, что ключи не пустые
+      if (!accessKey || !secretKey) {
+        return {
+          valid: false,
+          error: 'Access Key и Secret Key не могут быть пустыми',
+        };
+      }
+
+      this.logger.log('🧪 Тестирование новой пары API ключей...');
+
+      // Временно сохраняем текущие ключи
+      const originalApiKey = this.currentApiKey;
+      const originalJwtToken = this.cachedJwtToken;
+      const originalJwtExpiry = this.jwtTokenExpiry;
+
+      try {
+        // Временно устанавливаем новые ключи для тестирования
+        this.currentApiKey = {
+          id: 0, // Временный ID
+          accessKey,
+          secretKey,
+          name: 'TEST_KEY',
+          priority: 1,
+          isActive: true,
+          isAvailable: true,
+          errorCount: 0,
+          requestCount: 0,
+          lastUsed: new Date(),
+        };
+
+        // Сбрасываем JWT кеш для теста
+        this.cachedJwtToken = null;
+        this.jwtTokenExpiry = 0;
+
+        // Пытаемся сделать тестовый запрос
+        const testResponse = await axios.get(
+          'https://api.klingai.com/v1/images/generations?page=1&size=1',
+          {
+            headers: {
+              Authorization: `Bearer ${this.generateJwtToken()}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 10000, // 10 секунд на тест
+          },
+        );
+
+        if (testResponse.status === 200) {
+          this.logger.log(
+            '✅ Новая пара API ключей прошла тестирование успешно',
+          );
+          return { valid: true };
+        } else {
+          this.logger.warn(
+            `⚠️ Неожиданный статус ответа: ${testResponse.status}`,
+          );
+          return {
+            valid: false,
+            error: `Неожиданный статус: ${testResponse.status}`,
+          };
+        }
+      } finally {
+        // Восстанавливаем оригинальные ключи
+        this.currentApiKey = originalApiKey;
+        this.cachedJwtToken = originalJwtToken;
+        this.jwtTokenExpiry = originalJwtExpiry;
+      }
+    } catch (error) {
+      this.logger.error(
+        '❌ Ошибка при тестировании новой пары API ключей:',
+        error.message,
+      );
+
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const message = error.response?.data?.message || error.message;
+
+        if (status === 401) {
+          return {
+            valid: false,
+            error: 'Неверные API ключи - авторизация не прошла',
+          };
+        } else if (status === 403) {
+          return {
+            valid: false,
+            error: 'Доступ запрещен - проверьте права доступа API ключей',
+          };
+        } else {
+          return { valid: false, error: `Ошибка API: ${message}` };
+        }
+      }
+
+      return { valid: false, error: error.message };
+    }
+  }
+
   getCurrentApiKey(): any | null {
     if (!this.currentApiKey) return null;
 
