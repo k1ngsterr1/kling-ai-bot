@@ -207,13 +207,15 @@ export class RobokassaService {
     userId?: number,
     isRecurring?: boolean,
   ): string {
-    // Формула с дополнительными параметрами: MerchantLogin:OutSum:InvoiceID:Shp_UserId:Password1
+    // Базовая часть подписи: MerchantLogin:OutSum:InvoiceID
     let signatureString = `${this.merchantLogin}:${amount}:${invoiceId}`;
 
+    // Добавляем пользовательские параметры (если есть)
     if (userId) {
       signatureString += `:Shp_UserId=${userId}`;
     }
 
+    // Добавляем пароль в конце
     signatureString += `:${this.password1}`;
 
     this.logger.debug(
