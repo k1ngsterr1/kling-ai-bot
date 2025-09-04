@@ -107,20 +107,46 @@ export class RobokassaService {
       `Creating payment URL for user ${request.userId}, amount: ${amount} RUB, invoice: ${invoiceId}`,
     );
 
-    // Создаем запись в БД для связи invoiceId с userId
-    await this.prisma.payment.create({
-      data: {
-        invoiceId: invoiceId.toString(),
-        userId: request.userId.toString(),
-        amount: request.amount,
-        packageType: 'video_tokens', // По умолчанию видео токены
-        description: request.description || `Покупка ${amount} токенов`,
-        paymentMethod: 'robokassa',
-        status: 'pending',
-        videoTokensGranted: Math.floor(request.amount * 10), // 1 рубль = 10 токенов
-        imageTokensGranted: 0,
-      },
-    });
+    // Создаем или обновляем запись в БД для связи invoiceId с userId
+    try {
+      await this.prisma.payment.upsert({
+        where: {
+          invoiceId: invoiceId.toString(),
+        },
+        update: {
+          status: 'pending', // Обновляем статус если запись уже существует
+          updatedAt: new Date(),
+        },
+        create: {
+          invoiceId: invoiceId.toString(),
+          userId: request.userId.toString(),
+          amount: request.amount,
+          packageType: 'video_tokens', // По умолчанию видео токены
+          description: request.description || `Покупка ${amount} токенов`,
+          paymentMethod: 'robokassa',
+          status: 'pending',
+          videoTokensGranted: Math.floor(request.amount * 10), // 1 рубль = 10 токенов
+          imageTokensGranted: 0,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`Failed to create payment record: ${error.message}`);
+      // Генерируем новый invoiceId если была ошибка
+      invoiceId = Date.now() + Math.floor(Math.random() * 10000);
+      await this.prisma.payment.create({
+        data: {
+          invoiceId: invoiceId.toString(),
+          userId: request.userId.toString(),
+          amount: request.amount,
+          packageType: 'video_tokens',
+          description: request.description || `Покупка ${amount} токенов`,
+          paymentMethod: 'robokassa',
+          status: 'pending',
+          videoTokensGranted: Math.floor(request.amount * 10),
+          imageTokensGranted: 0,
+        },
+      });
+    }
 
     // Формируем подпись (без пользовательских параметров для избежания ошибки 29)
     const signature = this.generatePaymentSignature(
