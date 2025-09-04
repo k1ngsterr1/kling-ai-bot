@@ -484,11 +484,11 @@ ${subscriptionStatus}${subscriptionDetails}
 ▸ Автопродление · отмена в любой момент
 
 [🔹 ПРОДВИНУТЫЙ] 50 видео + 100 изо · 2230 ₽/мес
-▸ ~2400₽~ · экономия 170₽ (7%)
+▸ <s>2400₽</s> · экономия 170₽ (7%)
 ▸ Самый популярный вариант
 
 [🔹 ПРОФИ] 100 видео + 200 изо · 4320 ₽/мес
-▸ ~4800₽~ · экономия 480₽ (10%)
+▸ <s>4800₽</s> · экономия 480₽ (10%)
 ▸ Приоритетная очередь
 
 [💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ] 
@@ -523,6 +523,7 @@ ${subscriptionStatus}${subscriptionDetails}
 
       await this.bot.sendMessage(chatId, balanceText, {
         reply_markup: keyboard,
+        parse_mode: 'HTML',
       });
     } catch (error) {
       this.logger.error('Error in handleBalanceCommand:', error);
@@ -1690,11 +1691,11 @@ ${subscriptionStatus}${subscriptionDetails}
 ▸ Автопродление · отмена в любой момент
 
 [🔹 ПРОДВИНУТЫЙ] 50 видео + 100 изо · 2230 ₽/мес
-▸ ~2400₽~ · экономия 170₽ (7%)
+▸ <s>2400₽</s> · экономия 170₽ (7%)
 ▸ Самый популярный вариант
 
 [🔹 ПРОФИ] 100 видео + 200 изо · 4320 ₽/мес
-▸ ~4800₽~ · экономия 480₽ (10%)
+▸ <s>4800₽</s> · экономия 480₽ (10%)
 ▸ Приоритетная очередь
 
 [💎 ДОПОЛНИТЕЛЬНЫЕ ПАКЕТЫ] 
@@ -1728,6 +1729,7 @@ ${subscriptionStatus}${subscriptionDetails}
 
     this.bot.sendMessage(chatId, text, {
       reply_markup: keyboard,
+      parse_mode: 'HTML',
     });
   }
 
