@@ -79,11 +79,32 @@ export class RobokassaService {
   async createPaymentUrl(
     request: RobokassaPaymentRequest,
   ): Promise<RobokassaPaymentUrl> {
-    const invoiceId = Date.now(); // Уникальный ID заказа
+    // Генерируем уникальный ID с добавлением случайного числа
+    let invoiceId: number;
+    let attempts = 0;
+
+    do {
+      invoiceId = Date.now() + Math.floor(Math.random() * 1000);
+      attempts++;
+
+      // Проверяем, существует ли уже такой invoiceId
+      const existingPayment = await this.prisma.payment.findUnique({
+        where: { invoiceId: invoiceId.toString() },
+      });
+
+      if (!existingPayment) break;
+
+      // Если попытались более 10 раз - добавляем больше случайности
+      if (attempts > 10) {
+        invoiceId = Date.now() + Math.floor(Math.random() * 10000) + attempts;
+        break;
+      }
+    } while (attempts < 20);
+
     const amount = request.amount.toFixed(2);
 
     this.logger.log(
-      `Creating payment URL for user ${request.userId}, amount: ${amount} RUB`,
+      `Creating payment URL for user ${request.userId}, amount: ${amount} RUB, invoice: ${invoiceId}`,
     );
 
     // Создаем запись в БД для связи invoiceId с userId
