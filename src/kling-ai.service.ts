@@ -536,11 +536,12 @@ export class KlingAiService implements OnModuleInit {
 
       // Build payload according to Kling docs
       const klingRequest: any = {
-        model: this.getKlingModel(request.quality),
+        model_name: this.getKlingModel(request.quality),
         prompt: request.prompt ?? '',
         negative_prompt: '',
         aspect_ratio: request.aspectRatio,
         duration: request.duration,
+        mode: request.quality === 'standard' ? 'std' : 'pro',
       };
 
       if (hasImage) {
@@ -708,11 +709,11 @@ export class KlingAiService implements OnModuleInit {
 
   private getKlingModel(quality: string): string {
     const modelMap = {
-      standard: 'kling-v-1',
-      pro: 'kling-v-1',
-      master: 'kling-v-1-5',
+      standard: 'kling-v1',
+      pro: 'kling-v2-1-master',
+      master: 'kling-v2-master',
     };
-    return modelMap[quality] || 'kling-v-1';
+    return modelMap[quality] || 'kling-v1';
   }
 
   private mapKlingStatus(
@@ -755,7 +756,7 @@ export class KlingAiService implements OnModuleInit {
     );
 
     const payload = {
-      model: 'kling-v-1',
+      model_name: 'kling-v1',
       prompt: request.prompt,
       aspect_ratio: request.aspectRatio,
     };
