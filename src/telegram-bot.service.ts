@@ -3310,7 +3310,9 @@ ID: ${imageId}
 
     // Check if user is waiting for image prompt with reference photo
     if (userState?.state === 'waiting_image_prompt' && caption) {
-      this.logger.log('📸 Processing image generation with reference photo');
+      this.logger.log(
+        '📸 ✅ Processing image generation with reference photo (multiple photos flow)',
+      );
 
       if (caption.length > 300) {
         this.bot.sendMessage(
@@ -3531,6 +3533,7 @@ ${
 
     this.logger.log(`📸 Single photo message for chat ${chatId}`);
     this.logger.log(`📸 Caption: "${caption || 'none'}"`);
+    this.logger.log(`📸 User state: ${userState?.state || 'none'}`);
 
     // Ignore messages from bots (including our own bot)
     if (msg.from?.is_bot) {
@@ -3547,7 +3550,7 @@ ${
     // Check if user is waiting for image prompt with reference photo
     if (userState?.state === 'waiting_image_prompt' && caption) {
       this.logger.log(
-        '📸 Processing single image generation with reference photo',
+        '📸 ✅ Processing single image generation with reference photo',
       );
 
       if (caption.length > 300) {
