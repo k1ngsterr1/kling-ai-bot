@@ -1852,7 +1852,7 @@ ${subscriptionStatus}${subscriptionDetails}
       return;
     }
 
-    const { prompt, aspectRatio } = userState.data;
+    const { prompt, aspectRatio, referencePhoto } = userState.data;
 
     // Проверяем баланс пользователя (1 токен за изображение)
     const balanceCheck = await this.checkUserBalance(chatId, 1, 'image');
@@ -1900,26 +1900,32 @@ ${subscriptionStatus}${subscriptionDetails}
           | '3:2'
           | '2:3'
           | '21:9',
-        resolution: '2k', // Use high quality by default
         numberOfImages: 1,
       };
 
-      // Add reference image if provided
-      if (userState.data.referencePhoto) {
+      // Set resolution based on whether we have a reference image
+      if (referencePhoto) {
+        // For image-to-image generation, use 1k resolution
+        klingRequest.resolution = '1k';
+
         try {
           // Convert Telegram file to URL for Kling AI
-          const fileUrl = await this.getTelegramFileUrl(
-            userState.data.referencePhoto.file_id,
-          );
+          const fileUrl = await this.getTelegramFileUrl(referencePhoto.file_id);
           klingRequest.images = [fileUrl];
           klingRequest.modelName = 'kling-v1-5'; // Use v1.5 for image-to-image
           klingRequest.imageReference = 'subject'; // Use subject reference by default
           klingRequest.imageFidelity = 0.7; // Medium-high fidelity
-          this.logger.log(`🖼️ Using reference image: ${fileUrl}`);
+          this.logger.log(
+            `🖼️ Using reference image with 1k resolution: ${fileUrl}`,
+          );
         } catch (error) {
           this.logger.error('Error getting reference image URL:', error);
-          // Continue without reference image
+          // Continue without reference image and use 2k for text-to-image
+          klingRequest.resolution = '2k';
         }
+      } else {
+        // For text-to-image generation, use 2k resolution
+        klingRequest.resolution = '2k';
       }
 
       // Start generation with Kling AI
@@ -1928,12 +1934,13 @@ ${subscriptionStatus}${subscriptionDetails}
 
       if (generationResult.status === 'pending') {
         // Send initial progress message
-        const hasReference = userState.data.referencePhoto
+        const hasReference = referencePhoto
           ? '📷 С референсным изображением'
           : '🆕 Новое изображение';
+        const resolutionText = klingRequest.resolution === '1k' ? '1K' : '2K';
         const initialText = `
 ⏳ Генерация изображения началась!
-${hasReference}
+${hasReference} (${resolutionText})
 Примерное время: 1-2 мин
 ID: ${generationResult.id}
 
