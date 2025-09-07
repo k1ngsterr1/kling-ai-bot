@@ -1932,10 +1932,12 @@ ${subscriptionStatus}${subscriptionDetails}
             'Falling back to text-to-image generation without reference',
           );
           klingRequest.resolution = '2k';
-          delete klingRequest.images;
-          delete klingRequest.modelName;
-          delete klingRequest.imageReference;
-          delete klingRequest.imageFidelity;
+          // Ensure all image-related fields are removed
+          if (klingRequest.images) delete klingRequest.images;
+          if (klingRequest.modelName) delete klingRequest.modelName;
+          if (klingRequest.imageReference) delete klingRequest.imageReference;
+          if (klingRequest.imageFidelity) delete klingRequest.imageFidelity;
+          if (klingRequest.humanFidelity) delete klingRequest.humanFidelity;
         }
       } else {
         // For text-to-image generation, use 2k resolution
@@ -1947,6 +1949,15 @@ ${subscriptionStatus}${subscriptionDetails}
           );
         }
       }
+
+      // Debug logging before sending to Kling AI
+      this.logger.log(`📋 Final request config:`);
+      this.logger.log(`  - Resolution: ${klingRequest.resolution}`);
+      this.logger.log(`  - Model: ${klingRequest.modelName || 'default'}`);
+      this.logger.log(`  - Has images: ${!!klingRequest.images}`);
+      this.logger.log(
+        `  - Image reference: ${klingRequest.imageReference || 'none'}`,
+      );
 
       // Start generation with Kling AI
       const generationResult =
