@@ -17,7 +17,7 @@ export class TelegramBotService {
   private userStates: Map<number, { state: string; data?: any }> = new Map();
   private readonly adminIds: number[] = [205204465, 839885529]; // Admin IDs
   private readonly channelId = '@vse_ai'; // Channel for subscription check
-  private readonly enableImageToImage = false; // Temporarily disable until we fix the issue
+  private readonly enableImageToImage = true; // Re-enable with improved base64 handling
 
   // User groups for broadcasts
   private userGroups: Map<number, 'never_paid' | 'high_intent' | 'new_id'> =

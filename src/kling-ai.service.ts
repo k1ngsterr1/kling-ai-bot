@@ -795,12 +795,42 @@ export class KlingAiService implements OnModuleInit {
       } else if (imageData.startsWith('data:image/')) {
         // Extract base64 from data URL
         const base64Part = imageData.split(',')[1];
-        payload.image = base64Part;
-        this.logger.log('🖼️ Using base64 image data (extracted from data URL)');
+        if (!base64Part) {
+          this.logger.error(
+            '❌ Invalid data URL format - no base64 part found',
+          );
+          throw new Error('Invalid image data URL format');
+        }
+
+        // Validate base64
+        try {
+          Buffer.from(base64Part, 'base64');
+          payload.image = base64Part;
+          this.logger.log(
+            `🖼️ Using clean base64 image data (${base64Part.length} characters)`,
+          );
+        } catch (error) {
+          this.logger.error('❌ Invalid base64 data:', error.message);
+          throw new Error('Invalid base64 image data');
+        }
       } else {
         // Assume it's clean base64 or regular URL
-        payload.image = imageData;
-        this.logger.log('🖼️ Using image data as-is');
+        if (imageData.startsWith('http')) {
+          payload.image = imageData;
+          this.logger.log('🖼️ Using image URL as-is');
+        } else {
+          // Validate base64
+          try {
+            Buffer.from(imageData, 'base64');
+            payload.image = imageData;
+            this.logger.log(
+              `🖼️ Using clean base64 data (${imageData.length} characters)`,
+            );
+          } catch (error) {
+            this.logger.error('❌ Invalid base64 data:', error.message);
+            throw new Error('Invalid base64 image data');
+          }
+        }
       }
 
       // Add image reference type for kling-v1-5
