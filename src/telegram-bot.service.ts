@@ -1856,6 +1856,14 @@ ${subscriptionStatus}${subscriptionDetails}
 
     const { prompt, aspectRatio, referencePhoto } = userState.data;
 
+    // 🔍 Логирование начала генерации
+    this.logger.log(`🎨 === IMAGE GENERATION START ===`);
+    this.logger.log(`👤 User: ${chatId}`);
+    this.logger.log(`📝 Prompt: "${prompt}"`);
+    this.logger.log(`📐 Aspect: ${aspectRatio}`);
+    this.logger.log(`📸 Has ref photo: ${!!referencePhoto}`);
+    this.logger.log(`⚙️ Image-to-image enabled: ${this.enableImageToImage}`);
+
     // Проверяем баланс пользователя (1 токен за изображение)
     const balanceCheck = await this.checkUserBalance(chatId, 1, 'image');
 
@@ -1905,43 +1913,74 @@ ${subscriptionStatus}${subscriptionDetails}
         numberOfImages: 1,
       };
 
+      this.logger.log(`🔧 Initial request created`);
+
       // Set resolution based on whether we have a reference image
       if (referencePhoto && this.enableImageToImage) {
+        this.logger.log(
+          `📷 Processing reference image (file_id: ${referencePhoto.file_id})`,
+        );
+
         // For image-to-image generation, use 1k resolution
         klingRequest.resolution = '1k';
+        this.logger.log(`🔧 Set resolution: 1k (image-to-image)`);
 
         try {
+          this.logger.log(`🔄 Converting Telegram image to base64...`);
           // Convert Telegram file to base64 for Kling AI
           const base64Image = await this.convertTelegramImageToBase64(
             referencePhoto.file_id,
           );
+          this.logger.log(
+            `✅ Base64 conversion successful (length: ${base64Image.length} chars)`,
+          );
+
           klingRequest.images = [base64Image];
           klingRequest.modelName = 'kling-v1-5'; // Use v1.5 for image-to-image
           klingRequest.imageReference = 'subject'; // Use subject reference by default
           klingRequest.imageFidelity = 0.7; // Medium-high fidelity
+
+          this.logger.log(`🛠️ Image-to-image parameters set:`);
+          this.logger.log(`   - modelName: ${klingRequest.modelName}`);
+          this.logger.log(
+            `   - imageReference: ${klingRequest.imageReference}`,
+          );
+          this.logger.log(`   - imageFidelity: ${klingRequest.imageFidelity}`);
+          this.logger.log(
+            `   - images array length: ${klingRequest.images.length}`,
+          );
+
           this.logger.log(
             '🖼️ Using reference image with 1k resolution (base64 converted)',
           );
         } catch (error) {
           this.logger.error(
-            'Error converting reference image to base64:',
+            '❌ Error converting reference image to base64:',
             error,
           );
+          this.logger.error(`   Error type: ${error.constructor.name}`);
+          this.logger.error(`   Error message: ${error.message}`);
+
           // Try without reference image
           this.logger.warn(
-            'Falling back to text-to-image generation without reference',
+            '🔄 Falling back to text-to-image generation without reference',
           );
           klingRequest.resolution = '2k';
+          this.logger.log(`🔧 Changed resolution to: 2k (fallback mode)`);
+
           // Ensure all image-related fields are removed
           if (klingRequest.images) delete klingRequest.images;
           if (klingRequest.modelName) delete klingRequest.modelName;
           if (klingRequest.imageReference) delete klingRequest.imageReference;
           if (klingRequest.imageFidelity) delete klingRequest.imageFidelity;
           if (klingRequest.humanFidelity) delete klingRequest.humanFidelity;
+
+          this.logger.log(`🧹 Cleaned up image-to-image parameters`);
         }
       } else {
         // For text-to-image generation, use 2k resolution
         klingRequest.resolution = '2k';
+        this.logger.log(`🔧 Set resolution: 2k (text-to-image)`);
 
         if (referencePhoto && !this.enableImageToImage) {
           this.logger.warn(
@@ -1952,18 +1991,40 @@ ${subscriptionStatus}${subscriptionDetails}
 
       // Debug logging before sending to Kling AI
       this.logger.log(`📋 Final request config:`);
-      this.logger.log(`  - Resolution: ${klingRequest.resolution}`);
-      this.logger.log(`  - Model: ${klingRequest.modelName || 'default'}`);
-      this.logger.log(`  - Has images: ${!!klingRequest.images}`);
+      this.logger.log(`   - Prompt: "${klingRequest.prompt}"`);
+      this.logger.log(`   - Resolution: ${klingRequest.resolution}`);
+      this.logger.log(`   - Aspect ratio: ${klingRequest.aspectRatio}`);
+      this.logger.log(`   - Number of images: ${klingRequest.numberOfImages}`);
+      this.logger.log(`   - Model: ${klingRequest.modelName || 'default'}`);
+      this.logger.log(`   - Has images: ${!!klingRequest.images}`);
+      this.logger.log(
+        `   - Image reference: ${klingRequest.imageReference || 'N/A'}`,
+      );
+      this.logger.log(
+        `   - Image fidelity: ${klingRequest.imageFidelity || 'N/A'}`,
+      );
+      this.logger.log(`📤 Sending request to Kling AI...`);
       this.logger.log(
         `  - Image reference: ${klingRequest.imageReference || 'none'}`,
       );
+
+      this.logger.log(`📤 Sending request to Kling AI...`);
 
       // Start generation with Kling AI
       const generationResult =
         await this.klingAiService.generateImage(klingRequest);
 
+      this.logger.log(`📥 Received response from Kling AI:`);
+      this.logger.log(`   - Status: ${generationResult.status}`);
+      this.logger.log(`   - ID: ${generationResult.id}`);
+      this.logger.log(`   - Response type: ${typeof generationResult}`);
+      this.logger.log(
+        `   - Response keys: ${Object.keys(generationResult).join(', ')}`,
+      );
+
       if (generationResult.status === 'pending') {
+        this.logger.log(`✅ Image generation started successfully`);
+
         // Send initial progress message
         const isUsingReference =
           referencePhoto && this.enableImageToImage && klingRequest.images;
@@ -2007,11 +2068,19 @@ ID: ${generationResult.id}
           progressMessage.message_id,
         );
       } else {
+        this.logger.error(`❌ Image generation failed to start:`);
+        this.logger.error(`   - Status: ${generationResult.status}`);
+        this.logger.error(
+          `   - Full response: ${JSON.stringify(generationResult)}`,
+        );
+
         // Если генерация не запустилась, возвращаем токены
         await this.prisma.user.update({
           where: { telegramId: chatId.toString() },
           data: { imageTokens: { increment: 1 } },
         });
+
+        this.logger.log(`💰 Token refunded to user ${chatId}`);
 
         this.bot.sendMessage(
           chatId,
@@ -2021,8 +2090,22 @@ ID: ${generationResult.id}
 
       // Clear user state
       this.userStates.delete(chatId);
+      this.logger.log(`🧹 Cleared user state for ${chatId}`);
     } catch (error) {
-      this.logger.error('Error generating image:', error);
+      this.logger.error(
+        '❌ Critical error in handleImageGenerationConfirmation:',
+        error,
+      );
+      this.logger.error(`   Error type: ${error.constructor.name}`);
+      this.logger.error(`   Error message: ${error.message}`);
+      this.logger.error(`   Error stack: ${error.stack}`);
+
+      if (error.response) {
+        this.logger.error(`   HTTP Response status: ${error.response.status}`);
+        this.logger.error(
+          `   HTTP Response data: ${JSON.stringify(error.response.data)}`,
+        );
+      }
 
       // Return tokens on error
       try {
@@ -3852,15 +3935,19 @@ ${
   }
 
   private async convertTelegramImageToBase64(fileId: string): Promise<string> {
+    this.logger.log(`🔄 Starting image conversion for file_id: ${fileId}`);
+
     try {
+      this.logger.log(`📥 Getting Telegram file URL...`);
       const fileUrl = await this.getTelegramFileUrl(fileId);
 
       // Get file info
       const file = await this.bot.getFile(fileId);
       this.logger.log(
-        `📊 Processing file: ${file.file_path}, size: ${(file.file_size || 0) / 1024}KB`,
+        `📊 File info - path: ${file.file_path}, size: ${Math.round((file.file_size || 0) / 1024)}KB`,
       );
 
+      this.logger.log(`🌐 Downloading image from Telegram servers...`);
       // Download the image
       const response = await axios.get(fileUrl, {
         responseType: 'arraybuffer',
@@ -3870,9 +3957,16 @@ ${
         },
       });
 
+      this.logger.log(
+        `✅ Download complete: ${response.data.byteLength} bytes received`,
+      );
+
       // Check file size (max 5MB for safety with Kling AI)
       const maxSize = 5 * 1024 * 1024; // 5MB
       if (response.data.byteLength > maxSize) {
+        this.logger.error(
+          `❌ File too large: ${Math.round(response.data.byteLength / 1024 / 1024)}MB (max 5MB)`,
+        );
         throw new Error(
           'Image file too large (max 5MB). Please use a smaller image.',
         );
@@ -3880,40 +3974,64 @@ ${
 
       // Check if it's a valid image format by looking at headers
       const contentType = response.headers['content-type'];
+      this.logger.log(`🔍 Content type: ${contentType}`);
+
       if (!contentType || !contentType.startsWith('image/')) {
+        this.logger.error(`❌ Invalid content type: ${contentType}`);
         throw new Error('File is not a valid image format');
       }
 
       this.logger.log(
-        `📷 Image info: ${contentType}, ${response.data.byteLength} bytes`,
+        `📷 Image validated: ${contentType}, ${Math.round(response.data.byteLength / 1024)}KB`,
       );
 
+      this.logger.log(`🔄 Converting to base64...`);
       // Convert to base64 - return only the base64 string without data URL prefix
       const base64 = Buffer.from(response.data).toString('base64');
 
       // Validate base64 format
       if (!base64 || base64.length === 0) {
+        this.logger.error(`❌ Base64 conversion failed: empty result`);
         throw new Error('Failed to convert image to base64');
       }
+
+      this.logger.log(`📏 Base64 length: ${base64.length} characters`);
 
       // Clean base64 string (remove any whitespace/newlines)
       const cleanBase64 = base64.replace(/\s/g, '');
 
+      if (cleanBase64.length !== base64.length) {
+        this.logger.log(
+          `🧹 Cleaned base64: removed ${base64.length - cleanBase64.length} whitespace characters`,
+        );
+      }
+
       // Additional validation - check if base64 is valid
+      this.logger.log(`🔍 Validating base64 format...`);
       try {
         Buffer.from(cleanBase64, 'base64');
+        this.logger.log(`✅ Base64 validation passed`);
       } catch (e) {
+        this.logger.error(`❌ Base64 validation failed: ${e.message}`);
         throw new Error('Generated invalid base64 string');
       }
 
       this.logger.log(
-        `✅ Successfully converted to base64: ${cleanBase64.length} chars`,
+        `✅ Image conversion complete! Final base64 length: ${cleanBase64.length} chars`,
       );
 
       // Return only the clean base64 string
       return cleanBase64;
     } catch (error) {
-      this.logger.error('❌ Error converting Telegram image to base64:', error);
+      this.logger.error('❌ convertTelegramImageToBase64 failed:', error);
+      this.logger.error(`   Error type: ${error.constructor.name}`);
+      this.logger.error(`   Error message: ${error.message}`);
+      if (error.response) {
+        this.logger.error(`   HTTP status: ${error.response.status}`);
+        this.logger.error(
+          `   HTTP data: ${JSON.stringify(error.response.data)}`,
+        );
+      }
       throw new Error(`Failed to process reference image: ${error.message}`);
     }
   }
