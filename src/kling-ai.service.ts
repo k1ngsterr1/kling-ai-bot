@@ -805,9 +805,10 @@ export class KlingAiService implements OnModuleInit {
         // Validate base64
         try {
           Buffer.from(base64Part, 'base64');
+          // Try sending clean base64 without data URL prefix
           payload.image = base64Part;
           this.logger.log(
-            `🖼️ Using clean base64 image data (${base64Part.length} characters)`,
+            `🖼️ Using clean base64 from data URL (${base64Part.length} chars)`,
           );
         } catch (error) {
           this.logger.error('❌ Invalid base64 data:', error.message);
@@ -822,9 +823,11 @@ export class KlingAiService implements OnModuleInit {
           // Validate base64
           try {
             Buffer.from(imageData, 'base64');
+
+            // Try sending clean base64 without data URL prefix
             payload.image = imageData;
             this.logger.log(
-              `🖼️ Using clean base64 data (${imageData.length} characters)`,
+              `🖼️ Using clean base64 data (${imageData.length} chars)`,
             );
           } catch (error) {
             this.logger.error('❌ Invalid base64 data:', error.message);

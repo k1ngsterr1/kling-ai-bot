@@ -376,12 +376,13 @@ export class TelegramBotService {
 - Фото поможет задать стиль и композицию
 - Поддерживаются JPG/PNG до 10MB
 
-⚠️ Важно: 
-- Длина промпта: до 300 символов
-- Разрешение: высокое качество (1K/2K)
-- Баланс будет списан после выбора параметров
+⚠️ ВАЖНЫЕ ТРЕБОВАНИЯ к изображениям:
+- Минимальный размер: 300x300 пикселей
+- Соотношение сторон: от 1:2.5 до 2.5:1
+- Качественные изображения (не сжатые миниатюры)
+- Маленькие изображения будут отклонены с ошибкой
 
-👇 Отправьте описание ниже (с фото или без):
+👇 Отправьте описание ниже (с качественным фото или без):
     `;
 
     const keyboard = {
@@ -3961,14 +3962,25 @@ ${
         `✅ Download complete: ${response.data.byteLength} bytes received`,
       );
 
-      // Check file size (max 5MB for safety with Kling AI)
-      const maxSize = 5 * 1024 * 1024; // 5MB
-      if (response.data.byteLength > maxSize) {
+      // Check file size according to Kling AI requirements
+      const minSize = 10 * 1024; // 10KB minimum (rough estimate for 300x300px)
+      const maxSize = 10 * 1024 * 1024; // 10MB maximum per API docs
+
+      if (response.data.byteLength < minSize) {
         this.logger.error(
-          `❌ File too large: ${Math.round(response.data.byteLength / 1024 / 1024)}MB (max 5MB)`,
+          `❌ File too small: ${Math.round(response.data.byteLength / 1024)}KB. Kling AI requires images ≥300x300px.`,
         );
         throw new Error(
-          'Image file too large (max 5MB). Please use a smaller image.',
+          'Image too small. Kling AI requires images at least 300x300 pixels. Please use a larger image.',
+        );
+      }
+
+      if (response.data.byteLength > maxSize) {
+        this.logger.error(
+          `❌ File too large: ${Math.round(response.data.byteLength / 1024 / 1024)}MB (max 10MB)`,
+        );
+        throw new Error(
+          'Image file too large (max 10MB). Please use a smaller image.',
         );
       }
 
@@ -4011,8 +4023,10 @@ ${
         `🔍 File signature (first 8 bytes): ${signature.toString('hex')}`,
       );
 
-      // Check magic bytes for common image formats
+      // Check magic bytes for common image formats and get MIME type
       const isValidBySignature = this.isValidImageSignature(signature);
+      const detectedMimeType = this.getMimeTypeFromSignature(signature);
+
       if (!isValidBySignature) {
         this.logger.warn(
           `⚠️ File signature doesn't match known image formats, but proceeding anyway due to Telegram quirks`,
@@ -4020,6 +4034,9 @@ ${
       } else {
         this.logger.log(`✅ File signature validation passed`);
       }
+
+      this.logger.log(`🔍 Detected MIME type: ${detectedMimeType}`);
+
       this.logger.log(`🔄 Converting to base64...`);
       // Convert to base64 - return only the base64 string without data URL prefix
       const base64 = Buffer.from(response.data).toString('base64');
@@ -4086,6 +4103,21 @@ ${
     ];
 
     return imageSignatures.some((sig) => hex.startsWith(sig));
+  }
+
+  private getMimeTypeFromSignature(signature: Buffer): string {
+    const hex = signature.toString('hex').toLowerCase();
+
+    if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+    if (hex.startsWith('89504e47')) return 'image/png';
+    if (hex.startsWith('47494638')) return 'image/gif';
+    if (hex.startsWith('424d')) return 'image/bmp';
+    if (hex.startsWith('52494646')) return 'image/webp';
+    if (hex.startsWith('00000100')) return 'image/x-icon';
+    if (hex.startsWith('00000200')) return 'image/x-icon';
+
+    // Default to JPEG if unknown
+    return 'image/jpeg';
   }
 
   private handleDocumentMessage(msg: TelegramBot.Message) {
