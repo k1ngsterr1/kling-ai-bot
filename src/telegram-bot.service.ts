@@ -3972,19 +3972,54 @@ ${
         );
       }
 
-      // Check if it's a valid image format by looking at headers
+      // Check if it's a valid image format
       const contentType = response.headers['content-type'];
       this.logger.log(`🔍 Content type: ${contentType}`);
 
-      if (!contentType || !contentType.startsWith('image/')) {
-        this.logger.error(`❌ Invalid content type: ${contentType}`);
+      // Get file extension from file path for additional validation
+      const fileExtension = file.file_path?.split('.').pop()?.toLowerCase();
+      this.logger.log(`📂 File extension: ${fileExtension}`);
+
+      // Telegram sometimes returns application/octet-stream for images
+      // So we need to check both content-type and file extension
+      const isValidImage =
+        (contentType && contentType.startsWith('image/')) ||
+        (fileExtension &&
+          ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(
+            fileExtension,
+          )) ||
+        (contentType === 'application/octet-stream' &&
+          fileExtension &&
+          ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(fileExtension));
+
+      if (!isValidImage) {
+        this.logger.error(`❌ Invalid image format:`);
+        this.logger.error(`   Content-Type: ${contentType}`);
+        this.logger.error(`   File extension: ${fileExtension}`);
+        this.logger.error(`   File path: ${file.file_path}`);
         throw new Error('File is not a valid image format');
       }
 
       this.logger.log(
-        `📷 Image validated: ${contentType}, ${Math.round(response.data.byteLength / 1024)}KB`,
+        `✅ Image format validated: ${contentType} (ext: ${fileExtension}), ${Math.round(response.data.byteLength / 1024)}KB`,
       );
 
+      // Additional validation: check file signature (magic bytes)
+      const buffer = Buffer.from(response.data);
+      const signature = buffer.subarray(0, 8);
+      this.logger.log(
+        `🔍 File signature (first 8 bytes): ${signature.toString('hex')}`,
+      );
+
+      // Check magic bytes for common image formats
+      const isValidBySignature = this.isValidImageSignature(signature);
+      if (!isValidBySignature) {
+        this.logger.warn(
+          `⚠️ File signature doesn't match known image formats, but proceeding anyway due to Telegram quirks`,
+        );
+      } else {
+        this.logger.log(`✅ File signature validation passed`);
+      }
       this.logger.log(`🔄 Converting to base64...`);
       // Convert to base64 - return only the base64 string without data URL prefix
       const base64 = Buffer.from(response.data).toString('base64');
@@ -4034,6 +4069,23 @@ ${
       }
       throw new Error(`Failed to process reference image: ${error.message}`);
     }
+  }
+
+  private isValidImageSignature(signature: Buffer): boolean {
+    const hex = signature.toString('hex').toLowerCase();
+
+    // Check for common image format signatures (magic bytes)
+    const imageSignatures = [
+      'ffd8ff', // JPEG
+      '89504e47', // PNG
+      '47494638', // GIF
+      '424d', // BMP
+      '52494646', // WEBP (starts with RIFF)
+      '00000100', // ICO
+      '00000200', // CUR
+    ];
+
+    return imageSignatures.some((sig) => hex.startsWith(sig));
   }
 
   private handleDocumentMessage(msg: TelegramBot.Message) {
