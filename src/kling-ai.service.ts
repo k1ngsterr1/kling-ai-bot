@@ -636,32 +636,59 @@ export class KlingAiService implements OnModuleInit {
     try {
       this.logger.log(`Checking status for video ID: ${videoId}`);
 
-      // Get list of all videos and find our task
-      const response = await this.httpClient.get('/v1/videos/text2video', {
-        params: {
-          task_id: videoId,
-        },
-      });
+      // Try to find the task in both text2video and image2video endpoints
+      let task: any = null;
+      let foundInEndpoint = '';
 
-      this.logger.debug(`Kling AI Status Response:`, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        data: JSON.stringify(response.data, null, 2),
-      });
+      // First, try text2video endpoint
+      try {
+        const textResponse = await this.httpClient.get(
+          '/v1/videos/text2video',
+          {
+            params: {
+              task_id: videoId,
+            },
+          },
+        );
 
-      // Find the specific task in the response array
-      const tasks = response.data.data || [];
-      this.logger.debug(`Found ${tasks.length} tasks in response`);
+        const textTasks = textResponse.data.data || [];
+        task = textTasks.find((t: any) => t.task_id === videoId);
+        if (task) {
+          foundInEndpoint = 'text2video';
+          this.logger.debug(`Found task in text2video endpoint`);
+        }
+      } catch (error: any) {
+        this.logger.debug(`Error checking text2video endpoint:`, error.message);
+      }
 
-      const task = tasks.find((t) => t.task_id === videoId);
+      // If not found, try image2video endpoint
+      if (!task) {
+        try {
+          const imageResponse = await this.httpClient.get(
+            '/v1/videos/image2video',
+            {
+              params: {
+                task_id: videoId,
+              },
+            },
+          );
+
+          const imageTasks = imageResponse.data.data || [];
+          task = imageTasks.find((t: any) => t.task_id === videoId);
+          if (task) {
+            foundInEndpoint = 'image2video';
+            this.logger.debug(`Found task in image2video endpoint`);
+          }
+        } catch (error: any) {
+          this.logger.debug(
+            `Error checking image2video endpoint:`,
+            error.message,
+          );
+        }
+      }
 
       if (!task) {
-        this.logger.warn(`Task ${videoId} not found in response`);
-        this.logger.debug(
-          `Available task IDs:`,
-          tasks.map((t) => t.task_id),
-        );
+        this.logger.warn(`Task ${videoId} not found in either endpoint`);
         return {
           id: videoId,
           status: 'failed',
@@ -669,7 +696,7 @@ export class KlingAiService implements OnModuleInit {
       }
 
       this.logger.debug(
-        `Task details for ${videoId}:`,
+        `Task details for ${videoId} (found in ${foundInEndpoint}):`,
         JSON.stringify(task, null, 2),
       );
 
