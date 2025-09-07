@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot = require('node-telegram-bot-api');
+import axios from 'axios';
 import {
   KlingAiService,
   KlingVideoRequest,
@@ -1909,14 +1910,16 @@ ${subscriptionStatus}${subscriptionDetails}
         klingRequest.resolution = '1k';
 
         try {
-          // Convert Telegram file to URL for Kling AI
-          const fileUrl = await this.getTelegramFileUrl(referencePhoto.file_id);
-          klingRequest.images = [fileUrl];
+          // Convert Telegram file to base64 for Kling AI
+          const base64Image = await this.convertTelegramImageToBase64(
+            referencePhoto.file_id,
+          );
+          klingRequest.images = [base64Image];
           klingRequest.modelName = 'kling-v1-5'; // Use v1.5 for image-to-image
           klingRequest.imageReference = 'subject'; // Use subject reference by default
           klingRequest.imageFidelity = 0.7; // Medium-high fidelity
           this.logger.log(
-            `🖼️ Using reference image with 1k resolution: ${fileUrl}`,
+            '🖼️ Using reference image with 1k resolution (base64 converted)',
           );
         } catch (error) {
           this.logger.error('Error getting reference image URL:', error);
@@ -1989,18 +1992,36 @@ ID: ${generationResult.id}
     } catch (error) {
       this.logger.error('Error generating image:', error);
 
+      // Return tokens on error
+      try {
+        await this.prisma.user.update({
+          where: { telegramId: chatId.toString() },
+          data: { imageTokens: { increment: 1 } },
+        });
+      } catch (dbError) {
+        this.logger.error('Error returning tokens:', dbError);
+      }
+
       // Check if error is related to API keys
       if (error.message?.includes('API keys not configured')) {
         this.bot.sendMessage(
           chatId,
-          '❌ API ключи Kling AI не настроены!\n\nОбратитесь к администратору для настройки ключей через /admin',
+          '❌ API ключи Kling AI не настроены!\n\nТокен возвращен на ваш баланс.\n\nОбратитесь к администратору для настройки ключей через /admin',
+        );
+      } else if (error.message?.includes('Failed to process reference image')) {
+        this.bot.sendMessage(
+          chatId,
+          '❌ Ошибка обработки референсного изображения.\n\n💡 Попробуйте:\n• Отправить изображение в формате JPG/PNG\n• Уменьшить размер файла\n• Использовать другое изображение\n\n🔄 Токен возвращен на ваш баланс',
         );
       } else {
         this.bot.sendMessage(
           chatId,
-          '❌ Произошла ошибка при генерации изображения. Попробуйте позже.',
+          '❌ Произошла ошибка при генерации изображения.\n\n🔄 Токен возвращен на ваш баланс.\nПопробуйте позже.',
         );
       }
+
+      // Clear user state
+      this.userStates.delete(chatId);
     }
   }
 
@@ -2078,8 +2099,26 @@ ID: ${generationResult.id}
         quality: quality as 'standard' | 'pro' | 'master',
         duration: duration as 5 | 10,
         aspectRatio: aspectRatio as '1:1' | '9:16' | '16:9',
-        images: images.map((img) => img.file_id),
       };
+
+      // Convert images to base64 if provided
+      if (images && images.length > 0) {
+        try {
+          const base64Images = await Promise.all(
+            images.map((img) => this.convertTelegramImageToBase64(img.file_id)),
+          );
+          klingRequest.images = base64Images;
+          this.logger.log(
+            `🖼️ Converted ${base64Images.length} images to base64 for video generation`,
+          );
+        } catch (error) {
+          this.logger.error('Error converting images to base64:', error);
+          // Continue without images
+          this.logger.warn(
+            'Continuing video generation without reference images',
+          );
+        }
+      }
 
       // Start generation with Kling AI
       const generationResult =
@@ -3778,6 +3817,30 @@ ${
     if (!file.file_path) throw new Error('Telegram did not return file_path');
     // CAUTION: this URL contains your bot token — do not log it
     return `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+  }
+
+  private async convertTelegramImageToBase64(fileId: string): Promise<string> {
+    try {
+      const fileUrl = await this.getTelegramFileUrl(fileId);
+
+      // Download the image
+      const response = await axios.get(fileUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000, // 30 seconds timeout
+      });
+
+      // Convert to base64
+      const base64 = Buffer.from(response.data, 'binary').toString('base64');
+
+      // Get the content type from headers or assume JPEG
+      const contentType = response.headers['content-type'] || 'image/jpeg';
+
+      // Return data URL format
+      return `data:${contentType};base64,${base64}`;
+    } catch (error) {
+      this.logger.error('Error converting Telegram image to base64:', error);
+      throw new Error('Failed to process reference image');
+    }
   }
 
   private handleDocumentMessage(msg: TelegramBot.Message) {
