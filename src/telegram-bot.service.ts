@@ -17,6 +17,7 @@ export class TelegramBotService {
   private userStates: Map<number, { state: string; data?: any }> = new Map();
   private readonly adminIds: number[] = [205204465, 839885529]; // Admin IDs
   private readonly channelId = '@vse_ai'; // Channel for subscription check
+  private readonly enableImageToImage = false; // Temporarily disable until we fix the issue
 
   // User groups for broadcasts
   private userGroups: Map<number, 'never_paid' | 'high_intent' | 'new_id'> =
@@ -1905,28 +1906,46 @@ ${subscriptionStatus}${subscriptionDetails}
       };
 
       // Set resolution based on whether we have a reference image
-      if (referencePhoto) {
+      if (referencePhoto && this.enableImageToImage) {
         // For image-to-image generation, use 1k resolution
         klingRequest.resolution = '1k';
 
         try {
-          // First, try with direct Telegram URL
-          const fileUrl = await this.getTelegramFileUrl(referencePhoto.file_id);
-          klingRequest.images = [fileUrl];
+          // Convert Telegram file to base64 for Kling AI
+          const base64Image = await this.convertTelegramImageToBase64(
+            referencePhoto.file_id,
+          );
+          klingRequest.images = [base64Image];
           klingRequest.modelName = 'kling-v1-5'; // Use v1.5 for image-to-image
           klingRequest.imageReference = 'subject'; // Use subject reference by default
           klingRequest.imageFidelity = 0.7; // Medium-high fidelity
           this.logger.log(
-            '🖼️ Using reference image URL with 1k resolution (trying direct URL first)',
+            '🖼️ Using reference image with 1k resolution (base64 converted)',
           );
         } catch (error) {
-          this.logger.error('Error getting reference image URL:', error);
-          // Continue without reference image and use 2k for text-to-image
+          this.logger.error(
+            'Error converting reference image to base64:',
+            error,
+          );
+          // Try without reference image
+          this.logger.warn(
+            'Falling back to text-to-image generation without reference',
+          );
           klingRequest.resolution = '2k';
+          delete klingRequest.images;
+          delete klingRequest.modelName;
+          delete klingRequest.imageReference;
+          delete klingRequest.imageFidelity;
         }
       } else {
         // For text-to-image generation, use 2k resolution
         klingRequest.resolution = '2k';
+
+        if (referencePhoto && !this.enableImageToImage) {
+          this.logger.warn(
+            '🚫 Image-to-image is temporarily disabled, using text-to-image instead',
+          );
+        }
       }
 
       // Start generation with Kling AI
@@ -1935,9 +1954,13 @@ ${subscriptionStatus}${subscriptionDetails}
 
       if (generationResult.status === 'pending') {
         // Send initial progress message
-        const hasReference = referencePhoto
+        const isUsingReference =
+          referencePhoto && this.enableImageToImage && klingRequest.images;
+        const hasReference = isUsingReference
           ? '📷 С референсным изображением'
-          : '🆕 Новое изображение';
+          : referencePhoto && !this.enableImageToImage
+            ? '🆕 Новое изображение (ref. изображение временно отключено)'
+            : '🆕 Новое изображение';
         const resolutionText = klingRequest.resolution === '1k' ? '1K' : '2K';
         const initialText = `
 ⏳ Генерация изображения началась!
@@ -3821,17 +3844,38 @@ ${
     try {
       const fileUrl = await this.getTelegramFileUrl(fileId);
 
+      // Get file info
+      const file = await this.bot.getFile(fileId);
+      this.logger.log(
+        `📊 Processing file: ${file.file_path}, size: ${(file.file_size || 0) / 1024}KB`,
+      );
+
       // Download the image
       const response = await axios.get(fileUrl, {
         responseType: 'arraybuffer',
         timeout: 30000, // 30 seconds timeout
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; KlingAI-Bot/1.0)',
+        },
       });
 
-      // Check file size (max 10MB for safety)
-      const maxSize = 10 * 1024 * 1024; // 10MB
+      // Check file size (max 5MB for safety with Kling AI)
+      const maxSize = 5 * 1024 * 1024; // 5MB
       if (response.data.byteLength > maxSize) {
-        throw new Error('Image file too large (max 10MB)');
+        throw new Error(
+          'Image file too large (max 5MB). Please use a smaller image.',
+        );
       }
+
+      // Check if it's a valid image format by looking at headers
+      const contentType = response.headers['content-type'];
+      if (!contentType || !contentType.startsWith('image/')) {
+        throw new Error('File is not a valid image format');
+      }
+
+      this.logger.log(
+        `📷 Image info: ${contentType}, ${response.data.byteLength} bytes`,
+      );
 
       // Convert to base64 - return only the base64 string without data URL prefix
       const base64 = Buffer.from(response.data).toString('base64');
@@ -3844,15 +3888,22 @@ ${
       // Clean base64 string (remove any whitespace/newlines)
       const cleanBase64 = base64.replace(/\s/g, '');
 
+      // Additional validation - check if base64 is valid
+      try {
+        Buffer.from(cleanBase64, 'base64');
+      } catch (e) {
+        throw new Error('Generated invalid base64 string');
+      }
+
       this.logger.log(
-        `🖼️ Converted image to base64, length: ${cleanBase64.length} chars`,
+        `✅ Successfully converted to base64: ${cleanBase64.length} chars`,
       );
 
       // Return only the clean base64 string
       return cleanBase64;
     } catch (error) {
-      this.logger.error('Error converting Telegram image to base64:', error);
-      throw new Error('Failed to process reference image');
+      this.logger.error('❌ Error converting Telegram image to base64:', error);
+      throw new Error(`Failed to process reference image: ${error.message}`);
     }
   }
 
