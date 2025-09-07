@@ -22,7 +22,20 @@ export interface KlingVideoResponse {
 
 export interface KlingImageRequest {
   prompt: string;
-  aspectRatio: '1:1' | '9:16' | '16:9';
+  aspectRatio: '1:1' | '9:16' | '16:9' | '4:3' | '3:4' | '3:2' | '2:3' | '21:9';
+  negativePrompt?: string;
+  images?: string[]; // Reference images (URLs or base64)
+  imageReference?: 'subject' | 'face'; // For kling-v1-5
+  imageFidelity?: number; // Face reference intensity [0,1]
+  humanFidelity?: number; // Facial reference intensity [0,1]
+  resolution?: '1k' | '2k';
+  modelName?:
+    | 'kling-v1'
+    | 'kling-v1-5'
+    | 'kling-v2'
+    | 'kling-v2-new'
+    | 'kling-v2-1';
+  numberOfImages?: number; // [1,9]
 }
 
 export interface KlingImageResponse {
@@ -755,11 +768,40 @@ export class KlingAiService implements OnModuleInit {
       `Using API Key: ${this.currentApiKey.accessKey?.substring(0, 8)}...`,
     );
 
-    const payload = {
-      model_name: 'kling-v1',
+    const payload: any = {
+      model_name: request.modelName || 'kling-v1',
       prompt: request.prompt,
       aspect_ratio: request.aspectRatio,
+      resolution: request.resolution || '1k',
+      n: request.numberOfImages || 1,
     };
+
+    // Add negative prompt if provided
+    if (request.negativePrompt) {
+      payload.negative_prompt = request.negativePrompt;
+    }
+
+    // Add reference image if provided
+    if (request.images && request.images.length > 0) {
+      payload.image = request.images[0]; // Use first image as reference
+
+      // Add image reference type for kling-v1-5
+      if (request.modelName === 'kling-v1-5' && request.imageReference) {
+        payload.image_reference = request.imageReference;
+
+        if (
+          request.imageReference === 'subject' &&
+          request.humanFidelity !== undefined
+        ) {
+          payload.human_fidelity = request.humanFidelity;
+        }
+      }
+
+      // Add image fidelity if provided
+      if (request.imageFidelity !== undefined) {
+        payload.image_fidelity = request.imageFidelity;
+      }
+    }
 
     this.logger.log(
       'Sending image generation request to Kling AI:',
