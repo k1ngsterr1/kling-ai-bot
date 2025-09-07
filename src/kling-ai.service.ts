@@ -783,7 +783,25 @@ export class KlingAiService implements OnModuleInit {
 
     // Add reference image if provided
     if (request.images && request.images.length > 0) {
-      payload.image = request.images[0]; // Use first image as reference
+      const imageData = request.images[0];
+
+      // Check if it's a Telegram URL (contains bot token) or base64
+      if (imageData.startsWith('https://api.telegram.org/')) {
+        // For Telegram URLs, we might need to convert to base64
+        this.logger.log(
+          '⚠️ Detected Telegram URL - this might not work due to auth restrictions',
+        );
+        payload.image = imageData;
+      } else if (imageData.startsWith('data:image/')) {
+        // Extract base64 from data URL
+        const base64Part = imageData.split(',')[1];
+        payload.image = base64Part;
+        this.logger.log('🖼️ Using base64 image data (extracted from data URL)');
+      } else {
+        // Assume it's clean base64 or regular URL
+        payload.image = imageData;
+        this.logger.log('🖼️ Using image data as-is');
+      }
 
       // Add image reference type for kling-v1-5
       if (request.modelName === 'kling-v1-5' && request.imageReference) {

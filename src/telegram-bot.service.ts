@@ -1910,16 +1910,14 @@ ${subscriptionStatus}${subscriptionDetails}
         klingRequest.resolution = '1k';
 
         try {
-          // Convert Telegram file to base64 for Kling AI
-          const base64Image = await this.convertTelegramImageToBase64(
-            referencePhoto.file_id,
-          );
-          klingRequest.images = [base64Image];
+          // First, try with direct Telegram URL
+          const fileUrl = await this.getTelegramFileUrl(referencePhoto.file_id);
+          klingRequest.images = [fileUrl];
           klingRequest.modelName = 'kling-v1-5'; // Use v1.5 for image-to-image
           klingRequest.imageReference = 'subject'; // Use subject reference by default
           klingRequest.imageFidelity = 0.7; // Medium-high fidelity
           this.logger.log(
-            '🖼️ Using reference image with 1k resolution (base64 converted)',
+            '🖼️ Using reference image URL with 1k resolution (trying direct URL first)',
           );
         } catch (error) {
           this.logger.error('Error getting reference image URL:', error);
@@ -3829,14 +3827,29 @@ ${
         timeout: 30000, // 30 seconds timeout
       });
 
-      // Convert to base64
-      const base64 = Buffer.from(response.data, 'binary').toString('base64');
+      // Check file size (max 10MB for safety)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (response.data.byteLength > maxSize) {
+        throw new Error('Image file too large (max 10MB)');
+      }
 
-      // Get the content type from headers or assume JPEG
-      const contentType = response.headers['content-type'] || 'image/jpeg';
+      // Convert to base64 - return only the base64 string without data URL prefix
+      const base64 = Buffer.from(response.data).toString('base64');
 
-      // Return data URL format
-      return `data:${contentType};base64,${base64}`;
+      // Validate base64 format
+      if (!base64 || base64.length === 0) {
+        throw new Error('Failed to convert image to base64');
+      }
+
+      // Clean base64 string (remove any whitespace/newlines)
+      const cleanBase64 = base64.replace(/\s/g, '');
+
+      this.logger.log(
+        `🖼️ Converted image to base64, length: ${cleanBase64.length} chars`,
+      );
+
+      // Return only the clean base64 string
+      return cleanBase64;
     } catch (error) {
       this.logger.error('Error converting Telegram image to base64:', error);
       throw new Error('Failed to process reference image');
