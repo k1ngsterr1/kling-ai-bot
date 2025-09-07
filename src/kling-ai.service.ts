@@ -316,7 +316,7 @@ export class KlingAiService implements OnModuleInit {
     this.jwtTokenExpiry = 0;
 
     this.httpClient = axios.create({
-      baseURL: 'https://api.klingai.com',
+      baseURL: 'https://api-singapore.klingai.com',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -552,15 +552,20 @@ export class KlingAiService implements OnModuleInit {
         model_name: this.getKlingModel(request.quality),
         prompt: request.prompt ?? '',
         negative_prompt: '',
-        aspect_ratio: request.aspectRatio,
         duration: request.duration,
         mode: request.quality === 'standard' ? 'std' : 'pro',
       };
 
+      // For text2video, add aspect_ratio. For image2video, it's determined by the image
+      if (!hasImage) {
+        klingRequest.aspect_ratio = request.aspectRatio;
+      }
+
       if (hasImage) {
         this.logger.log('Including image in video generation request');
         klingRequest.image = request.images![0];
-        // If the API supports more controls (e.g., strength), add them here.
+        // Add cfg_scale for better control in image2video
+        klingRequest.cfg_scale = 0.5;
       }
 
       this.logger.log(
