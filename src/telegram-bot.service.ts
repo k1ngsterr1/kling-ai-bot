@@ -3378,7 +3378,9 @@ ID: ${imageId}
     // If photo has caption and user is not in video flow, treat caption as video prompt
     if (
       caption &&
-      (!userState || userState.state !== 'video_prompt_received')
+      (!userState ||
+        (userState.state !== 'video_prompt_received' &&
+          userState.state !== 'waiting_image_prompt'))
     ) {
       if (caption.length > 300) {
         this.bot.sendMessage(
@@ -3542,10 +3544,86 @@ ${
       return;
     }
 
-    // If photo has caption and user is not in video flow, treat caption as video prompt
+    // Check if user is waiting for image prompt with reference photo
+    if (userState?.state === 'waiting_image_prompt' && caption) {
+      this.logger.log(
+        '📸 Processing single image generation with reference photo',
+      );
+
+      if (caption.length > 300) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
+        );
+        return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
+      }
+
+      // Save prompt and photo as reference
+      const photo = msg.photo?.[msg.photo.length - 1];
+      if (photo) {
+        this.userStates.set(chatId, {
+          state: 'image_prompt_received',
+          data: {
+            prompt: caption,
+            referencePhoto: {
+              file_id: photo.file_id,
+              file_unique_id: photo.file_unique_id,
+            },
+          },
+        });
+
+        const responseText = `
+📸 Референсное изображение добавлено!
+
+Промпт: "${caption}"
+📷 С референсным фото
+
+Выберите соотношение сторон:
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              { text: '⬜ 1:1 (квадрат)', callback_data: 'image_ratio_1:1' },
+              {
+                text: '📱 9:16 (вертикаль)',
+                callback_data: 'image_ratio_9:16',
+              },
+            ],
+            [
+              {
+                text: '🖥️ 16:9 (горизонталь)',
+                callback_data: 'image_ratio_16:9',
+              },
+              { text: '📋 4:3', callback_data: 'image_ratio_4:3' },
+            ],
+            [
+              { text: '🖼️ 3:2', callback_data: 'image_ratio_3:2' },
+              { text: '🎬 21:9 (ультра)', callback_data: 'image_ratio_21:9' },
+            ],
+            [{ text: '🔙 Назад к изображениям', callback_data: 'image' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      }
+      return;
+    }
+
+    // If photo has caption and user is not in video flow or image flow, treat caption as video prompt
     if (
       caption &&
-      (!userState || userState.state !== 'video_prompt_received')
+      (!userState ||
+        (userState.state !== 'video_prompt_received' &&
+          userState.state !== 'waiting_image_prompt'))
     ) {
       if (caption.length > 300) {
         this.bot.sendMessage(
