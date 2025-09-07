@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TelegramBotService } from './telegram-bot.service';
+import { AdminBotService } from './admin-bot.service';
 import { TelegramController } from './telegram.controller';
 import { KlingAiService } from './kling-ai.service';
 import { PrismaService } from './prisma.service';
@@ -21,6 +22,7 @@ import { PaymentController } from './payment.controller';
   providers: [
     AppService,
     TelegramBotService,
+    AdminBotService,
     KlingAiService,
     PrismaService,
     RobokassaService,
