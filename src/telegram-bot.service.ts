@@ -363,7 +363,7 @@ export class TelegramBotService {
     this.userStates.set(chatId, { state: 'waiting_image_prompt' });
 
     const imageText = `
-� СОЗДАНИЕ ИЗОБРАЖЕНИЙ
+🎨 СОЗДАНИЕ ИЗОБРАЖЕНИЙ
 Доступные генерации:
 
 [🚀 ТЕКСТ → ШЕДЕВР]  
