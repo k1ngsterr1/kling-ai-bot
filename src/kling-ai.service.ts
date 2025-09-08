@@ -633,9 +633,22 @@ export class KlingAiService implements OnModuleInit {
   }
 
   async getVideoStatus(videoId: string): Promise<KlingVideoResponse> {
-    try {
-      this.logger.log(`Checking status for video ID: ${videoId}`);
+    this.logger.log(`Checking status for video ID: ${videoId}`);
 
+    // Check if this is a mock ID from failed API call
+    if (videoId.startsWith('VG-')) {
+      this.logger.warn(
+        `Mock video ID detected: ${videoId}, returning mock completed status`,
+      );
+      return {
+        id: videoId,
+        status: 'completed',
+        videoUrl:
+          'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+      };
+    }
+
+    try {
       // Try to find the task in both text2video and image2video endpoints
       let task: any = null;
       let foundInEndpoint = '';
@@ -929,14 +942,18 @@ export class KlingAiService implements OnModuleInit {
       }
 
       // Return mock response for development
+      const mockId = this.generateMockImageId();
       this.logger.warn(
-        'Returning mock image generation response due to API error',
+        `❌ API CALL FAILED - Returning mock image ID: ${mockId}`,
       );
       this.logger.warn(
-        'This means the API call failed and you are seeing a placeholder image',
+        '🔧 This means the Kling AI API call failed and user will see a placeholder image',
+      );
+      this.logger.warn(
+        '💡 The mock ID will be handled separately in status check functions',
       );
       return {
-        id: this.generateMockImageId(),
+        id: mockId,
         status: 'pending',
         estimatedTime: 30,
       };
@@ -945,6 +962,18 @@ export class KlingAiService implements OnModuleInit {
 
   async getImageStatus(imageId: string): Promise<KlingImageResponse> {
     this.logger.log(`Checking status for image: ${imageId}`);
+
+    // Check if this is a mock ID from failed API call
+    if (imageId.startsWith('IG-')) {
+      this.logger.warn(
+        `Mock image ID detected: ${imageId}, returning mock completed status`,
+      );
+      return {
+        id: imageId,
+        status: 'completed',
+        imageUrl: 'https://picsum.photos/512/512?random=' + Date.now(),
+      };
+    }
 
     try {
       const result = await this.retryRequest(
@@ -1049,6 +1078,18 @@ export class KlingAiService implements OnModuleInit {
 
   async getImageResult(imageId: string): Promise<KlingImageResponse | null> {
     this.logger.log(`Getting final result for image: ${imageId}`);
+
+    // Check if this is a mock ID from failed API call
+    if (imageId.startsWith('IG-')) {
+      this.logger.warn(
+        `Mock image ID detected: ${imageId}, returning mock result`,
+      );
+      return {
+        id: imageId,
+        status: 'completed',
+        imageUrl: 'https://picsum.photos/512/512?random=' + Date.now(),
+      };
+    }
 
     try {
       // Use the same logic as getImageStatus with retry mechanism
