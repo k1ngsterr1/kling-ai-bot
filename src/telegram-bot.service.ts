@@ -4858,7 +4858,7 @@ ${selectedPlan.recurring ? '• Автопродление каждый меся
             callback_data: `buy_card_${packageName.replace(/\s+/g, '_')}_${price}`,
           },
         ],
-        [{ text: 'Назад', callback_data: 'main' }],
+        [{ text: '🔙 Назад', callback_data: 'additional_packages' }],
       ],
     };
 
@@ -6582,6 +6582,7 @@ ${statusIcon} **${key.name}**${activeText}
               url: 'https://teletype.in/@help_24/oferta_kling',
             },
           ],
+          [{ text: '🔙 Назад', callback_data: 'balance' }],
         ],
       };
 
