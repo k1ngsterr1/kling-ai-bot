@@ -10,6 +10,7 @@ export interface KlingVideoRequest {
   duration: 5 | 10;
   aspectRatio: '1:1' | '9:16' | '16:9';
   images?: string[];
+  modelName?: string;
 }
 
 export interface KlingVideoResponse {
@@ -549,7 +550,7 @@ export class KlingAiService implements OnModuleInit {
 
       // Build payload according to Kling docs
       const klingRequest: any = {
-        model_name: this.getKlingModel(request.quality),
+        model_name: request.modelName || this.getKlingModel(request.quality),
         prompt: request.prompt ?? '',
         negative_prompt: '',
         duration: request.duration,

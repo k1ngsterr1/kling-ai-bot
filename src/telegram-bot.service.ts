@@ -1198,20 +1198,21 @@ ${subscriptionStatus}${subscriptionDetails}
     const settingsText = `
 🎚️ Выберите качество видео:
 
-⚡ STANDARD
+⚡ STANDARD (Kling V1)
 └ Скорость: Быстрая (2-4 мин)
 └ Детализация: Базовая
 └ Стоимость: 1 токен за 5s
 
-🎓 PRO 
+🎓 PRO (Kling V1)
 └ Скорость: Средняя (4-8 мин)
 └ Детализация: Высокая
 └ Стоимость: 2 токена за 5s 
 
-💎 MASTER 
+💎 MASTER (Kling V2.1 Master)
 └ Скорость: Приоритетная (1-3 мин)
 └ Детализация: Кинематографичная 4k HDR
-└ Стоимость: 4 токен за 5s
+└ Модель: Kling V2.1 Master (новейшая)
+└ Стоимость: 4 токена за 5s
     `;
 
     const keyboard = {
@@ -2213,6 +2214,13 @@ ID: ${generationResult.id}
         aspectRatio: aspectRatio as '1:1' | '9:16' | '16:9',
       };
 
+      // ✅ ДОБАВЛЯЕМ ВЫБОР МОДЕЛИ НА ОСНОВЕ КАЧЕСТВА
+      if (quality === 'master') {
+        klingRequest.modelName = 'kling-v2-1-master';
+      } else {
+        klingRequest.modelName = 'kling-v1'; // Для standard и pro используем обычную модель
+      }
+
       // Convert images to base64 if provided
       if (images && images.length > 0) {
         try {
@@ -2243,6 +2251,7 @@ ID: ${generationResult.id}
       const generationText = `
 ⏳ Генерация начата!
 ID: #${generationResult.id}
+Модель: ${klingRequest.modelName || 'kling-v1'}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
 
 💰 Списано: ${totalCost} токенов
