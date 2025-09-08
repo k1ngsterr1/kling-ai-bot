@@ -1203,9 +1203,10 @@ ${subscriptionStatus}${subscriptionDetails}
 └ Детализация: Базовая
 └ Стоимость: 1 токен за 5s
 
-🎓 PRO (Kling V1)
+🎓 PRO (Kling V2 Master)
 └ Скорость: Средняя (4-8 мин)
 └ Детализация: Высокая
+└ Модель: Kling V2 Master
 └ Стоимость: 2 токена за 5s 
 
 💎 MASTER (Kling V2.1 Master)
@@ -2217,8 +2218,10 @@ ID: ${generationResult.id}
       // ✅ ДОБАВЛЯЕМ ВЫБОР МОДЕЛИ НА ОСНОВЕ КАЧЕСТВА
       if (quality === 'master') {
         klingRequest.modelName = 'kling-v2-1-master';
+      } else if (quality === 'pro') {
+        klingRequest.modelName = 'kling-v2-master';
       } else {
-        klingRequest.modelName = 'kling-v1'; // Для standard и pro используем обычную модель
+        klingRequest.modelName = 'kling-v1-6'; // Для standard используем базовую модель
       }
 
       // Convert images to base64 if provided
