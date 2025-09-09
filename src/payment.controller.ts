@@ -638,24 +638,58 @@ export class PaymentController {
           ? new Date(now.getTime() + subscriptionDuration * 24 * 60 * 60 * 1000)
           : null;
 
-      // Для Robokassa платежей (помесячные) - обновляем подписку
+      // Для Robokassa платежей (помесячные) - используем сброс токенов при подписке
       if (payment.paymentMethod === 'robokassa') {
-        await this.prismaService.user.update({
-          where: { telegramId: userId.toString() },
-          data: {
-            videoTokens: { increment: videoTokens },
-            imageTokens: { increment: imageTokens },
-            isSubscribed: true,
-            subscriptionExpiry: expiresAt,
-            subscriptionType: payment.isRecurring
-              ? 'robokassa_monthly_recurring'
-              : 'robokassa_monthly_onetime',
-            lastPaymentMethod: 'robokassa',
-            lastPaymentDate: now,
-          },
-        });
+        if (payment.isRecurring) {
+          // Для повторяющихся платежей - СБРАСЫВАЕМ старые токены
+          const burnedTokens =
+            await this.telegramBotService.resetTokensOnSubscriptionRenewal(
+              userId,
+              videoTokens,
+              imageTokens,
+            );
+
+          this.logger.log(
+            `🔥 Robokassa subscription renewal for user ${userId}:`,
+            {
+              burnedVideoTokens: burnedTokens.burnedVideoTokens,
+              burnedImageTokens: burnedTokens.burnedImageTokens,
+              newVideoTokens: videoTokens,
+              newImageTokens: imageTokens,
+            },
+          );
+        } else {
+          // Для первого платежа - обычное добавление
+          await this.prismaService.user.update({
+            where: { telegramId: userId.toString() },
+            data: {
+              videoTokens: { increment: videoTokens },
+              imageTokens: { increment: imageTokens },
+              isSubscribed: true,
+              subscriptionExpiry: expiresAt,
+              subscriptionType: 'robokassa_monthly_onetime',
+              lastPaymentMethod: 'robokassa',
+              lastPaymentDate: now,
+            },
+          });
+
+          // Уведомляем о первой подписке
+          await this.telegramBotService.sendMessage(
+            parseInt(userId),
+            `✅ Подписка активирована!
+
+💎 Токены зачислены:
+🎬 Видео: ${videoTokens}
+🖼 Изображения: ${imageTokens}
+
+📅 Подписка активна до: ${expiresAt?.toLocaleDateString('ru-RU')}
+🔄 Автопродление: включено
+
+⚠️ При следующем продлении неиспользованные токены сгорят!`,
+          );
+        }
       } else {
-        // Для других способов оплаты - просто добавляем токены
+        // Для других способов оплаты (Telegram Stars) - просто добавляем токены
         await this.updateUserBalance(userId, videoTokens, imageTokens);
       }
 
@@ -962,36 +996,26 @@ export class PaymentController {
       const videoTokens = payment.videoTokensGranted;
       const imageTokens = payment.imageTokensGranted;
 
-      // Обновляем токены пользователя в базе данных
-      await this.prismaService.user.upsert({
-        where: { telegramId: userId },
-        update: {
-          videoTokens: { increment: videoTokens },
-          imageTokens: { increment: imageTokens },
-          updatedAt: new Date(),
-        },
-        create: {
-          telegramId: userId,
-          videoTokens: videoTokens,
-          imageTokens: imageTokens,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+      // Сбрасываем старые токены и устанавливаем новые при продлении подписки
+      const burnedTokens =
+        await this.telegramBotService.resetTokensOnSubscriptionRenewal(
+          userId,
+          videoTokens,
+          imageTokens,
+        );
+
+      this.logger.log(`🔥 Burned tokens for user ${userId}:`, {
+        burnedVideoTokens: burnedTokens.burnedVideoTokens,
+        burnedImageTokens: burnedTokens.burnedImageTokens,
+        newVideoTokens: videoTokens,
+        newImageTokens: imageTokens,
       });
 
       // Обновляем статус платежа
       await this.updatePaymentStatus(invoiceId, 'completed');
 
-      // Уведомляем пользователя
-      await this.notifyUserAboutRecurringPayment(
-        userId,
-        amount,
-        videoTokens,
-        imageTokens,
-      );
-
       this.logger.log(
-        `Recurring payment processed successfully for user ${userId}`,
+        `Recurring payment processed successfully for user ${userId} with token reset`,
       );
     } catch (error) {
       this.logger.error('Error processing recurring payment:', error);

@@ -563,6 +563,8 @@ ${subscriptionStatus}${subscriptionDetails}
 /balance - Проверка баланса
 /help - Помощь
 
+
+
 📋 Документы:
     `;
 
@@ -7320,6 +7322,88 @@ ${statusIcon} **${key.name}**${activeText}
           message_id: processingMsg.message_id,
         },
       );
+    }
+  }
+
+  /**
+   * Сбрасывает неиспользованные токены при продлении подписки
+   */
+  public async resetTokensOnSubscriptionRenewal(
+    userId: string,
+    newVideoTokens: number,
+    newImageTokens: number,
+  ): Promise<{ burnedVideoTokens: number; burnedImageTokens: number }> {
+    try {
+      // Получаем текущий баланс пользователя
+      const user = await this.prisma.user.findUnique({
+        where: { telegramId: userId },
+      });
+
+      if (!user) {
+        this.logger.warn(`User ${userId} not found for token reset`);
+        return { burnedVideoTokens: 0, burnedImageTokens: 0 };
+      }
+
+      const currentVideoTokens = user.videoTokens || 0;
+      const currentImageTokens = user.imageTokens || 0;
+
+      this.logger.log(`🔥 Token reset for user ${userId}:`);
+      this.logger.log(`   - Current video tokens: ${currentVideoTokens}`);
+      this.logger.log(`   - Current image tokens: ${currentImageTokens}`);
+      this.logger.log(`   - New video tokens: ${newVideoTokens}`);
+      this.logger.log(`   - New image tokens: ${newImageTokens}`);
+
+      // Обновляем токены (ЗАМЕНЯЕМ, а не добавляем)
+      await this.prisma.user.update({
+        where: { telegramId: userId },
+        data: {
+          videoTokens: newVideoTokens,
+          imageTokens: newImageTokens,
+          subscriptionExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // +30 дней
+          isSubscribed: true,
+          lastPaymentDate: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      // Уведомляем пользователя о сгоревших токенах
+      if (currentVideoTokens > 0 || currentImageTokens > 0) {
+        const burnMessage = `⚠️ Продление подписки
+
+✅ Ваша подписка успешно продлена на месяц!
+
+🔥 Неиспользованные токены сгорели:
+${currentVideoTokens > 0 ? `🎬 Видео: ${currentVideoTokens}` : ''}
+${currentImageTokens > 0 ? `🖼 Изображения: ${currentImageTokens}` : ''}
+
+💎 Новые токены зачислены:
+🎬 Видео: ${newVideoTokens}
+🖼 Изображения: ${newImageTokens}
+
+💡 Совет: Используйте токены в течение месяца, иначе они сгорят при следующем продлении!`;
+
+        await this.bot.sendMessage(parseInt(userId), burnMessage);
+      } else {
+        // Если токенов не было, просто уведомляем о продлении
+        const renewalMessage = `✅ Подписка продлена!
+
+💎 Новые токены зачислены:
+🎬 Видео: ${newVideoTokens}
+🖼 Изображения: ${newImageTokens}
+
+Подписка активна до: ${new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('ru-RU')}`;
+
+        await this.bot.sendMessage(parseInt(userId), renewalMessage);
+      }
+
+      this.logger.log(`✅ Token reset completed for user ${userId}`);
+      return {
+        burnedVideoTokens: currentVideoTokens,
+        burnedImageTokens: currentImageTokens,
+      };
+    } catch (error) {
+      this.logger.error(`Error resetting tokens for user ${userId}:`, error);
+      return { burnedVideoTokens: 0, burnedImageTokens: 0 };
     }
   }
 }
