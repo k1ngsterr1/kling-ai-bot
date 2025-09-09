@@ -85,6 +85,25 @@ export class KlingAiService implements OnModuleInit {
   private readonly API_RECOVERY_TIME = 30 * 60 * 1000; // 30 минут для восстановления API
   private readonly REQUEST_TIMEOUT = 30000; // 30 секунд таймаут
 
+  // Вспомогательная функция для безопасного логирования объектов
+  private safeLogObject(label: string, obj: any): void {
+    if (!obj) {
+      this.logger.debug(`${label}: No data available`);
+      return;
+    }
+    
+    try {
+      const stringified = JSON.stringify(obj, null, 2);
+      if (stringified === '{}' || stringified === '[]') {
+        this.logger.debug(`${label}: Empty object/array`);
+      } else {
+        this.logger.debug(`${label}:`, stringified);
+      }
+    } catch (error) {
+      this.logger.debug(`${label}: Error serializing object:`, error);
+    }
+  }
+
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
@@ -737,10 +756,7 @@ export class KlingAiService implements OnModuleInit {
         };
       }
 
-      this.logger.debug(
-        `Task details for ${videoId} (found in ${foundInEndpoint}):`,
-        JSON.stringify(task, null, 2),
-      );
+      this.safeLogObject(`Task details for ${videoId} (found in ${foundInEndpoint})`, task);
 
       const result: KlingVideoResponse = {
         id: videoId,
@@ -757,10 +773,7 @@ export class KlingAiService implements OnModuleInit {
         `Video ${videoId} status: ${result.status} (raw: ${task.task_status})`,
       );
       if (task.task_result) {
-        this.logger.debug(
-          `Task result:`,
-          JSON.stringify(task.task_result, null, 2),
-        );
+        this.safeLogObject('Task result', task.task_result);
       }
       if (result.videoUrl) {
         this.logger.log(`Video URL: ${result.videoUrl}`);

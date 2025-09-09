@@ -2466,13 +2466,17 @@ ID: #${generationResult.id}
 
         // Update progress message
         const estimatedMinutes = Math.ceil(180 / 60); // 3 minutes default
+        const elapsedTime = Math.floor((attempts * 30) / 60); // elapsed time in minutes
         const updatedText = `
 ⏳ Генерация начата!
 ID: #${videoId}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
+Прошло времени: ${elapsedTime} мин
+Статус: ${status.status}
 Текущий статус: ${progressBar} ${progress}%]
 
 🔔 Мы пришлем результат сразу как он будет готов
+Попытка: ${attempts}/${maxAttempts}
         `;
 
         const keyboard = {
@@ -2481,15 +2485,21 @@ ID: #${videoId}
           ],
         };
 
-        // Update the progress message
+        // Update the progress message only if content actually changed
         try {
           await this.bot.editMessageText(updatedText, {
             chat_id: chatId,
             message_id: progressMessageId,
             reply_markup: keyboard,
           });
-        } catch (editError) {
-          this.logger.warn('Could not update progress message:', editError);
+          this.logger.debug(`Updated progress message: attempt ${attempts}, progress ${progress}%`);
+        } catch (editError: any) {
+          // Only log if it's not the "message not modified" error
+          if (!editError.message?.includes('message is not modified')) {
+            this.logger.warn('Could not update progress message:', editError.message);
+          } else {
+            this.logger.debug(`Progress message unchanged (attempt ${attempts})`);
+          }
         }
 
         if (status.status === 'completed' && status.videoUrl) {
@@ -3038,12 +3048,16 @@ ID: ${imageId}
 
           const progressBar = this.createProgressBar(progress);
 
+          const elapsedMinutes = Math.floor(timeElapsed / (60 * 1000));
           const updatedText = `⏳ Генерация изображения...
 ID: ${imageId}
 Примерное время: 1-3 мин
+Прошло времени: ${elapsedMinutes} мин
+Статус: ${status.status}
 Текущий статус: ${progressBar} ${Math.floor(progress)}%]
 
-🔔 Мы пришлем результат автоматически`;
+🔔 Мы пришлем результат автоматически
+Попытка: ${attempts}/${maxAttempts}`;
 
           const keyboard = {
             inline_keyboard: [
@@ -3057,8 +3071,14 @@ ID: ${imageId}
               message_id: progressMessageId,
               reply_markup: keyboard,
             });
-          } catch (editError) {
-            this.logger.warn('Could not update progress message:', editError);
+            this.logger.debug(`Updated image progress: attempt ${attempts}, progress ${Math.floor(progress)}%`);
+          } catch (editError: any) {
+            // Only log if it's not the "message not modified" error
+            if (!editError.message?.includes('message is not modified')) {
+              this.logger.warn('Could not update progress message:', editError.message);
+            } else {
+              this.logger.debug(`Image progress message unchanged (attempt ${attempts})`);
+            }
           }
         }
 
@@ -3191,12 +3211,15 @@ ID: ${imageId}
         const progressBar = this.createProgressBar(progress);
 
         // Update progress message
+        const elapsedMinutes = Math.floor((attempts * 10) / 60); // 10 seconds per attempt
         const updatedText = `
 ⏳ Генерация изображения...
 Примерное время: 1-2 мин
+Прошло времени: ${elapsedMinutes} мин
 Текущий статус: ${progressBar} ${progress}%]
 
 🔔 Мы пришлем результат сразу как он будет готов
+Попытка: ${attempts}/${maxAttempts}
         `;
 
         const keyboard = {
@@ -3212,8 +3235,14 @@ ID: ${imageId}
             message_id: progressMessageId,
             reply_markup: keyboard,
           });
-        } catch (editError) {
-          this.logger.warn('Could not update progress message:', editError);
+          this.logger.debug(`Updated fallback progress: attempt ${attempts}, progress ${progress}%`);
+        } catch (editError: any) {
+          // Only log if it's not the "message not modified" error
+          if (!editError.message?.includes('message is not modified')) {
+            this.logger.warn('Could not update progress message:', editError.message);
+          } else {
+            this.logger.debug(`Fallback progress message unchanged (attempt ${attempts})`);
+          }
         }
 
         if (attempts >= maxAttempts) {
