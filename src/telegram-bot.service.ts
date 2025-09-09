@@ -1205,23 +1205,18 @@ ${subscriptionStatus}${subscriptionDetails}
 ⚡ STANDARD
 └ Скорость: Быстрая (2-4 мин)
 └ Детализация: Базовая
-└ Модель: V1.6 (text) / V2.1 (image+text)
-└ Режим: STD (экономичный)
 └ Стоимость: 1 токен за 5s
 
-🎓 PRO
+🎓 PRO 
 └ Скорость: Средняя (4-8 мин)
 └ Детализация: Высокая
-└ Модель: V1.6 (text) / V2.1 PRO (image+text)
-└ Режим: Professional (высокое качество)
 └ Стоимость: 2 токена за 5s 
 
-💎 MASTER
+💎 MASTER 
 └ Скорость: Приоритетная (1-3 мин)
 └ Детализация: Кинематографичная 4k HDR
-└ Модель: V2.1 Master (универсальная)
-└ Режим: Maximum (максимальное качество)
 └ Стоимость: 4 токена за 5s
+
     `;
 
     const keyboard = {
@@ -1310,10 +1305,10 @@ ${subscriptionStatus}${subscriptionDetails}
     const durationText = `
 ⏱️ Выберите длительность видео:
 
-▫️ 5 СЕКУНД: ${cost5s} ${cost5s === 1 ? 'токен' : cost5s < 5 ? 'токена' : 'токенов'}
+▫️ 5 СЕКУНД: ${cost5s} ${cost5s === 1 ? 'токен' : cost5s >= 2 && cost5s <= 4 ? 'токена' : 'токенов'}
    └ Идеально для TikTok/Reels/Shorts
 
-▫️ 10 СЕКУНД: ${cost10s} ${cost10s < 5 ? 'токена' : 'токенов'}
+▫️ 10 СЕКУНД: ${cost10s} ${cost10s >= 2 && cost10s <= 4 ? 'токена' : 'токенов'}
    └ Полноценная сцена с развитием
 
 👇 Выберите вариант:
@@ -1323,17 +1318,17 @@ ${subscriptionStatus}${subscriptionDetails}
       inline_keyboard: [
         [
           {
-            text: `[5 секунд - ${cost5s} ${cost5s === 1 ? 'токен' : cost5s < 5 ? 'токена' : 'токенов'}]`,
+            text: `5 секунд`,
             callback_data: 'duration_5',
           },
         ],
         [
           {
-            text: `[10 секунд - ${cost10s} ${cost10s < 5 ? 'токена' : 'токенов'}]`,
+            text: `10 секунд`,
             callback_data: 'duration_10',
           },
         ],
-        [{ text: '[Назад]', callback_data: 'video_settings' }],
+        [{ text: 'Назад', callback_data: 'video_settings' }],
       ],
     };
 
@@ -1457,7 +1452,7 @@ ${subscriptionStatus}${subscriptionDetails}
 Модель: V2.1 ${qualityNames[quality]}
 Длительность: ${duration}s
 Промпт: "${prompt}"
-Стоимость: ${totalCost} токенов
+Стоимость: ${totalCost} ${totalCost === 1 ? 'токен' : totalCost >= 2 && totalCost <= 4 ? 'токена' : 'токенов'}
 Текущий баланс: ${balanceText}
 
     `;
@@ -2298,8 +2293,8 @@ ID: #${generationResult.id}
 Модель: ${klingRequest.modelName || 'kling-v1'}
 Примерное время: ${estimatedMinutes}-${estimatedMinutes + 2} мин
 
-💰 Списано: ${totalCost} токенов
-🏦 Остаток: ${balanceCheck.currentBalance - totalCost} токенов
+💰 Списано: ${totalCost} ${totalCost === 1 ? 'токен' : totalCost >= 2 && totalCost <= 4 ? 'токена' : 'токенов'}
+🏦 Остаток: ${balanceCheck.currentBalance - totalCost} ${balanceCheck.currentBalance - totalCost === 1 ? 'токен' : balanceCheck.currentBalance - totalCost >= 2 && balanceCheck.currentBalance - totalCost <= 4 ? 'токена' : 'токенов'}
 
 Текущий статус: [██████▒▒▒▒▒▒▒▒▒ 20%]
 
