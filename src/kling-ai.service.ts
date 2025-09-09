@@ -598,25 +598,25 @@ export class KlingAiService implements OnModuleInit {
       this.logger.log(
         `Starting ${hasImage ? 'image2video' : 'text2video'} with prompt: "${request.prompt || ''}"`,
       );
+
+      this.logger.log(`🚀 === KLING AI SERVICE VIDEO REQUEST ===`);
+      this.logger.log(`📡 API Endpoint: ${endpoint}`);
+      this.logger.log(`🔑 Using API Key: ${this.currentApiKey.name}`);
+      this.logger.log(`📦 Payload being sent to Kling AI:`);
+      this.logger.log(JSON.stringify(klingRequest, null, 2));
       this.logger.log(
-        'Sending request to Kling AI:',
-        JSON.stringify(klingRequest, null, 2),
+        `📏 Payload size: ${JSON.stringify(klingRequest).length} characters`,
       );
 
       const response = await this.httpClient.post(endpoint, klingRequest);
 
+      this.logger.log(`📨 === KLING AI SERVICE VIDEO RESPONSE ===`);
       this.logger.log(
-        'Kling AI Generate Response:',
-        JSON.stringify(
-          {
-            status: response.status,
-            statusText: response.statusText,
-            data: response.data,
-          },
-          null,
-          2,
-        ),
+        `📊 HTTP Status: ${response.status} ${response.statusText}`,
       );
+      this.logger.log(`📋 Response Headers:`, response.headers);
+      this.logger.log(`💾 Response Data:`);
+      this.logger.log(JSON.stringify(response.data, null, 2));
 
       const result: KlingVideoResponse = {
         id:
@@ -660,7 +660,9 @@ export class KlingAiService implements OnModuleInit {
   }
 
   async getVideoStatus(videoId: string): Promise<KlingVideoResponse> {
-    this.logger.log(`Checking status for video ID: ${videoId}`);
+    this.logger.log(`🔍 === CHECKING VIDEO STATUS ===`);
+    this.logger.log(`📋 Video ID: ${videoId}`);
+    this.logger.log(`🔑 Using API Key: ${this.currentApiKey?.name || 'none'}`);
 
     // Check if this is a mock ID from failed API call
     if (videoId.startsWith('VG-')) {
@@ -927,10 +929,19 @@ export class KlingAiService implements OnModuleInit {
       }
     }
 
+    this.logger.log(`🚀 === KLING AI SERVICE IMAGE REQUEST ===`);
+    this.logger.log(`📡 API Endpoint: /v1/images/generations`);
+    this.logger.log(`🔑 Using API Key: ${this.currentApiKey.name}`);
+    this.logger.log(`📦 Payload being sent to Kling AI:`);
+    this.logger.log(JSON.stringify(payload, null, 2));
     this.logger.log(
-      'Sending image generation request to Kling AI:',
-      JSON.stringify(payload, null, 2),
+      `📏 Payload size: ${JSON.stringify(payload).length} characters`,
     );
+    if (payload.image) {
+      this.logger.log(
+        `🖼️ Image data included: ${payload.image.length} characters`,
+      );
+    }
 
     try {
       // Use relative path so httpClient interceptors handle auth
@@ -939,9 +950,13 @@ export class KlingAiService implements OnModuleInit {
         payload,
       );
 
+      this.logger.log(`📨 === KLING AI SERVICE IMAGE RESPONSE ===`);
       this.logger.log(
-        `Image generation initiated. Response: ${JSON.stringify(response.data)}`,
+        `📊 HTTP Status: ${response.status} ${response.statusText}`,
       );
+      this.logger.log(`📋 Response Headers:`, response.headers);
+      this.logger.log(`💾 Response Data:`);
+      this.logger.log(JSON.stringify(response.data, null, 2));
 
       if (response.data && response.data.data && response.data.data.task_id) {
         return {
@@ -989,7 +1004,9 @@ export class KlingAiService implements OnModuleInit {
   }
 
   async getImageStatus(imageId: string): Promise<KlingImageResponse> {
-    this.logger.log(`Checking status for image: ${imageId}`);
+    this.logger.log(`🔍 === CHECKING IMAGE STATUS ===`);
+    this.logger.log(`📋 Image ID: ${imageId}`);
+    this.logger.log(`🔑 Using API Key: ${this.currentApiKey?.name || 'none'}`);
 
     // Check if this is a mock ID from failed API call
     if (imageId.startsWith('IG-')) {

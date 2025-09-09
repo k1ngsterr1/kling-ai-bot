@@ -2007,15 +2007,44 @@ ${subscriptionStatus}${subscriptionDetails}
         `  - Image reference: ${klingRequest.imageReference || 'none'}`,
       );
 
-      this.logger.log(`📤 Sending request to Kling AI...`);
+      this.logger.log(`📤 === KLING AI IMAGE GENERATION API CALL ===`);
+      this.logger.log(`🔗 Endpoint: /v1/images/generations`);
+      this.logger.log(`📋 Full request parameters:`);
+      this.logger.log(`   - prompt: "${klingRequest.prompt}"`);
+      this.logger.log(`   - aspectRatio: ${klingRequest.aspectRatio}`);
+      this.logger.log(`   - resolution: ${klingRequest.resolution}`);
+      this.logger.log(`   - numberOfImages: ${klingRequest.numberOfImages}`);
+      this.logger.log(
+        `   - images: ${klingRequest.images ? `[${klingRequest.images.length} items]` : 'none'}`,
+      );
+      this.logger.log(
+        `   - imageReference: ${klingRequest.imageReference || 'none'}`,
+      );
+      this.logger.log(
+        `   - imageFidelity: ${klingRequest.imageFidelity || 'none'}`,
+      );
+      this.logger.log(
+        `   - humanFidelity: ${klingRequest.humanFidelity || 'none'}`,
+      );
+      this.logger.log(
+        `   - negativePrompt: ${klingRequest.negativePrompt || 'none'}`,
+      );
+      this.logger.log(`🚀 Making API call...`);
 
       // Start generation with Kling AI
       const generationResult =
         await this.klingAiService.generateImage(klingRequest);
 
-      this.logger.log(`📥 Received response from Kling AI:`);
+      this.logger.log(`📥 === KLING AI IMAGE GENERATION API RESPONSE ===`);
       this.logger.log(`   - Status: ${generationResult.status}`);
       this.logger.log(`   - ID: ${generationResult.id}`);
+      this.logger.log(
+        `   - Estimated time: ${generationResult.estimatedTime}s`,
+      );
+      this.logger.log(`   - Image URL: ${generationResult.imageUrl || 'none'}`);
+      this.logger.log(
+        `   - Error message: ${generationResult.errorMessage || 'none'}`,
+      );
       this.logger.log(`   - Response type: ${typeof generationResult}`);
       this.logger.log(
         `   - Response keys: ${Object.keys(generationResult).join(', ')}`,
@@ -2279,9 +2308,56 @@ ID: ${generationResult.id}
         }
       }
 
+      this.logger.log(`📤 === KLING AI VIDEO GENERATION API CALL ===`);
+      this.logger.log(
+        `🔗 Endpoint: ${hasImages ? '/v1/videos/image2video' : '/v1/videos/text2video'}`,
+      );
+      this.logger.log(`📋 Full request parameters:`);
+      this.logger.log(`   - prompt: "${klingRequest.prompt}"`);
+      this.logger.log(`   - quality: ${klingRequest.quality}`);
+      this.logger.log(`   - duration: ${klingRequest.duration}s`);
+      this.logger.log(`   - aspectRatio: ${klingRequest.aspectRatio}`);
+      this.logger.log(`   - modelName: ${klingRequest.modelName}`);
+      this.logger.log(`   - mode: ${klingRequest.mode}`);
+      this.logger.log(
+        `   - image (start frame): ${klingRequest.image ? 'PROVIDED' : 'none'}`,
+      );
+      this.logger.log(
+        `   - image_tail (end frame): ${klingRequest.image_tail ? 'PROVIDED' : 'none'}`,
+      );
+      this.logger.log(
+        `   - images (deprecated): ${klingRequest.images ? `[${klingRequest.images.length} items]` : 'none'}`,
+      );
+      if (klingRequest.image) {
+        this.logger.log(
+          `   - start frame length: ${klingRequest.image.length} chars`,
+        );
+      }
+      if (klingRequest.image_tail) {
+        this.logger.log(
+          `   - end frame length: ${klingRequest.image_tail.length} chars`,
+        );
+      }
+      this.logger.log(`🚀 Making API call...`);
+
       // Start generation with Kling AI
       const generationResult =
         await this.klingAiService.generateVideo(klingRequest);
+
+      this.logger.log(`📥 === KLING AI VIDEO GENERATION API RESPONSE ===`);
+      this.logger.log(`   - Status: ${generationResult.status}`);
+      this.logger.log(`   - ID: ${generationResult.id}`);
+      this.logger.log(
+        `   - Estimated time: ${generationResult.estimatedTime}s`,
+      );
+      this.logger.log(`   - Video URL: ${generationResult.videoUrl || 'none'}`);
+      this.logger.log(
+        `   - Error message: ${generationResult.errorMessage || 'none'}`,
+      );
+      this.logger.log(`   - Response type: ${typeof generationResult}`);
+      this.logger.log(
+        `   - Response keys: ${Object.keys(generationResult).join(', ')}`,
+      );
 
       const estimatedMinutes = Math.ceil(
         (generationResult.estimatedTime || 180) / 60,
