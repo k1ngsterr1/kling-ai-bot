@@ -29,16 +29,11 @@ export interface KlingImageRequest {
   aspectRatio: '1:1' | '9:16' | '16:9' | '4:3' | '3:4' | '3:2' | '2:3' | '21:9';
   negativePrompt?: string;
   images?: string[]; // Reference images (URLs or base64)
-  imageReference?: 'subject' | 'face'; // For kling-v1-5
+  imageReference?: 'subject' | 'face'; // For image-to-image
   imageFidelity?: number; // Face reference intensity [0,1]
   humanFidelity?: number; // Facial reference intensity [0,1]
   resolution?: '1k' | '2k';
-  modelName?:
-    | 'kling-v1'
-    | 'kling-v1-5'
-    | 'kling-v2'
-    | 'kling-v2-new'
-    | 'kling-v2-1';
+  // modelName фиксированная: всегда kling-v2-1 для изображений
   numberOfImages?: number; // [1,9]
 }
 
@@ -846,7 +841,7 @@ export class KlingAiService implements OnModuleInit {
     );
 
     const payload: any = {
-      model_name: request.modelName || 'kling-v1',
+      model_name: 'kling-v2-1', // Всегда используем kling-v2-1 для изображений
       prompt: request.prompt,
       aspect_ratio: request.aspectRatio,
       resolution: request.resolution || '1k',
@@ -913,8 +908,8 @@ export class KlingAiService implements OnModuleInit {
         }
       }
 
-      // Add image reference type for kling-v1-5
-      if (request.modelName === 'kling-v1-5' && request.imageReference) {
+      // Add image reference type (для image-to-image с kling-v2-1)
+      if (request.imageReference) {
         payload.image_reference = request.imageReference;
 
         if (
