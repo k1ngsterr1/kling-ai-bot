@@ -1202,24 +1202,25 @@ ${subscriptionStatus}${subscriptionDetails}
     const settingsText = `
 🎚️ Выберите качество видео:
 
-⚡ STANDARD (Kling V1 + STD режим)
+⚡ STANDARD
 └ Скорость: Быстрая (2-4 мин)
 └ Детализация: Базовая
-└ Режим: Standard (экономичный)
+└ Модель: V1.6 (text) / V2.1 (image+text)
+└ Режим: STD (экономичный)
 └ Стоимость: 1 токен за 5s
 
-🎓 PRO (Kling V2 Master + PRO режим)
+🎓 PRO
 └ Скорость: Средняя (4-8 мин)
 └ Детализация: Высокая
-└ Модель: Kling V2 Master
+└ Модель: V1.6 (text) / V2.1 PRO (image+text)
 └ Режим: Professional (высокое качество)
 └ Стоимость: 2 токена за 5s 
 
-💎 MASTER (Kling V2.1 Master + PRO режим)
+💎 MASTER
 └ Скорость: Приоритетная (1-3 мин)
 └ Детализация: Кинематографичная 4k HDR
-└ Модель: Kling V2.1 Master (новейшая)
-└ Режим: Professional (максимальное качество)
+└ Модель: V2.1 Master (универсальная)
+└ Режим: Maximum (максимальное качество)
 └ Стоимость: 4 токена за 5s
     `;
 
@@ -2219,16 +2220,36 @@ ID: ${generationResult.id}
         aspectRatio: aspectRatio as '1:1' | '9:16' | '16:9',
       };
 
-      // ✅ ДОБАВЛЯЕМ ВЫБОР МОДЕЛИ И РЕЖИМА НА ОСНОВЕ КАЧЕСТВА
-      if (quality === 'master') {
-        klingRequest.modelName = 'kling-v2-1-master';
-        klingRequest.mode = 'std'; // Master использует pro режим для максимального качества
-      } else if (quality === 'pro') {
-        klingRequest.modelName = 'kling-v1-6';
-        klingRequest.mode = 'pro'; // Pro использует pro режим для высокого качества
+      // ✅ ДОБАВЛЯЕМ ВЫБОР МОДЕЛИ И РЕЖИМА НА ОСНОВЕ КАЧЕСТВА И ENDPOINT'А
+      const hasImages = images && images.length > 0;
+
+      if (hasImages) {
+        // Для /v1/videos/image2video используем модели V2.1
+        if (quality === 'master') {
+          klingRequest.modelName = 'kling-v2-1';
+        } else if (quality === 'pro') {
+          klingRequest.modelName = 'kling-v2-1';
+        } else {
+          klingRequest.modelName = 'kling-v2-1';
+        }
+        this.logger.log(
+          `🎬 Using image2video endpoint with model: ${klingRequest.modelName}`,
+        );
       } else {
-        klingRequest.modelName = 'kling-v1-6'; // Для standard используем базовую модель
-        klingRequest.mode = 'std'; // Standard использует std режим для экономичности
+        // Для /v1/videos/text2video используем старые проверенные модели
+        if (quality === 'master') {
+          klingRequest.modelName = 'kling-v2-1-master';
+          klingRequest.mode = 'std';
+        } else if (quality === 'pro') {
+          klingRequest.modelName = 'kling-v1-6';
+          klingRequest.mode = 'pro';
+        } else {
+          klingRequest.modelName = 'kling-v1-6';
+          klingRequest.mode = 'std';
+        }
+        this.logger.log(
+          `📝 Using text2video endpoint with model: ${klingRequest.modelName}`,
+        );
       }
 
       // Convert images to base64 if provided

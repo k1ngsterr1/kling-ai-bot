@@ -793,12 +793,13 @@ export class KlingAiService implements OnModuleInit {
   }
 
   private getKlingModel(quality: string): string {
+    // Fallback модели (обычно modelName устанавливается явно в telegram-bot.service.ts)
     const modelMap = {
-      standard: 'kling-v1',
-      pro: 'kling-v2-1-master',
-      master: 'kling-v2-master',
+      standard: 'kling-v1-6', // для text2video
+      pro: 'kling-v1-6', // для text2video
+      master: 'kling-v2-1-master', // универсально
     };
-    return modelMap[quality] || 'kling-v1';
+    return modelMap[quality] || 'kling-v1-6';
   }
 
   private mapKlingStatus(
