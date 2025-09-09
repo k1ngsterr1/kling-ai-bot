@@ -9,8 +9,11 @@ export interface KlingVideoRequest {
   quality: 'standard' | 'pro' | 'master';
   duration: 5 | 10;
   aspectRatio: '1:1' | '9:16' | '16:9';
-  images?: string[];
+  images?: string[]; // Deprecated: для обратной совместимости
+  image?: string; // Начальный кадр (первое изображение)
+  image_tail?: string; // Конечный кадр (второе изображение)
   modelName?: string;
+  mode?: 'std' | 'pro';
 }
 
 export interface KlingVideoResponse {
@@ -540,8 +543,11 @@ export class KlingAiService implements OnModuleInit {
     }
 
     try {
-      const hasImage =
+      // Определяем наличие изображений
+      const hasImageFromArray =
         Array.isArray(request.images) && request.images.length > 0;
+      const hasImageFromFields = request.image || request.image_tail;
+      const hasImage = hasImageFromArray || hasImageFromFields;
 
       // Decide endpoint
       const endpoint = hasImage
@@ -554,7 +560,7 @@ export class KlingAiService implements OnModuleInit {
         prompt: request.prompt ?? '',
         negative_prompt: '',
         duration: request.duration,
-        mode: request.quality === 'standard' ? 'std' : 'pro',
+        mode: request.mode || (request.quality === 'standard' ? 'std' : 'pro'),
       };
 
       // For text2video, add aspect_ratio. For image2video, it's determined by the image
@@ -562,9 +568,34 @@ export class KlingAiService implements OnModuleInit {
         klingRequest.aspect_ratio = request.aspectRatio;
       }
 
+      // Обработка изображений для image2video
       if (hasImage) {
-        this.logger.log('Including image in video generation request');
-        klingRequest.image = request.images![0];
+        this.logger.log('Including image(s) in video generation request');
+
+        // Поддержка новых полей image и image_tail
+        if (request.image) {
+          klingRequest.image = request.image;
+          this.logger.log('Added start frame (image)');
+        }
+
+        if (request.image_tail) {
+          klingRequest.image_tail = request.image_tail;
+          this.logger.log('Added end frame (image_tail)');
+        }
+
+        // Обратная совместимость с массивом images
+        if (!request.image && !request.image_tail && hasImageFromArray) {
+          klingRequest.image = request.images![0];
+          if (request.images!.length > 1) {
+            klingRequest.image_tail = request.images![1];
+            this.logger.log(
+              'Using images array: first as start frame, second as end frame',
+            );
+          } else {
+            this.logger.log('Using images array: single image as start frame');
+          }
+        }
+
         // Add cfg_scale for better control in image2video
         klingRequest.cfg_scale = 0.5;
       }

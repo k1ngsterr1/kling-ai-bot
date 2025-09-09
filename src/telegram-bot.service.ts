@@ -337,15 +337,19 @@ export class TelegramBotService {
 • «Робот-шеф готовит пиццу на Марсе, 8К детализация»
 • «Золотой дракон над средневековым замком» + фото Эйфелевой башни
 
-🖼️ Как использовать изображения:
-1. Для Standard/PRO: фото задают стиль и атмосферу
-2. Для MASTER: 
-   - Фото 1 = главный объект/персонаж 
-   - Фото 2 = фон/локация
+🖼️ Как использовать изображения (до 2 шт):
+📸 **1 фото** = Начальный кадр видео
+📸 **2 фото** = Начальный кадр + Конечный кадр
+   ↳ Видео плавно переходит от первого ко второму изображению
+
+💡 **Режимы работы:**
+• **Standard/Pro:** Фото задают общий стиль и атмосферу
+• **Master:** Точное управление начальным и конечным кадрами
 
 ⚠️ Важно: 
 - Длина промпта: до 300 символов
-- Изображения: JPG/PNG (до 15MB)
+- Изображения: JPG/PNG (до 10MB, мин. 300x300px)
+- Соотношение сторон: от 1:2.5 до 2.5:1
 - Баланс будет списан после выбора параметров
 
 👇 Отправьте описание ниже:
@@ -1198,21 +1202,24 @@ ${subscriptionStatus}${subscriptionDetails}
     const settingsText = `
 🎚️ Выберите качество видео:
 
-⚡ STANDARD (Kling V1)
+⚡ STANDARD (Kling V1 + STD режим)
 └ Скорость: Быстрая (2-4 мин)
 └ Детализация: Базовая
+└ Режим: Standard (экономичный)
 └ Стоимость: 1 токен за 5s
 
-🎓 PRO (Kling V2 Master)
+🎓 PRO (Kling V2 Master + PRO режим)
 └ Скорость: Средняя (4-8 мин)
 └ Детализация: Высокая
 └ Модель: Kling V2 Master
+└ Режим: Professional (высокое качество)
 └ Стоимость: 2 токена за 5s 
 
-💎 MASTER (Kling V2.1 Master)
+💎 MASTER (Kling V2.1 Master + PRO режим)
 └ Скорость: Приоритетная (1-3 мин)
 └ Детализация: Кинематографичная 4k HDR
 └ Модель: Kling V2.1 Master (новейшая)
+└ Режим: Professional (максимальное качество)
 └ Стоимость: 4 токена за 5s
     `;
 
@@ -2215,13 +2222,16 @@ ID: ${generationResult.id}
         aspectRatio: aspectRatio as '1:1' | '9:16' | '16:9',
       };
 
-      // ✅ ДОБАВЛЯЕМ ВЫБОР МОДЕЛИ НА ОСНОВЕ КАЧЕСТВА
+      // ✅ ДОБАВЛЯЕМ ВЫБОР МОДЕЛИ И РЕЖИМА НА ОСНОВЕ КАЧЕСТВА
       if (quality === 'master') {
         klingRequest.modelName = 'kling-v2-1-master';
+        klingRequest.mode = 'std'; // Master использует pro режим для максимального качества
       } else if (quality === 'pro') {
         klingRequest.modelName = 'kling-v2-master';
+        klingRequest.mode = 'pro'; // Pro использует pro режим для высокого качества
       } else {
-        klingRequest.modelName = 'kling-v1-6'; // Для standard используем базовую модель
+        klingRequest.modelName = 'kling-v1'; // Для standard используем базовую модель
+        klingRequest.mode = 'std'; // Standard использует std режим для экономичности
       }
 
       // Convert images to base64 if provided
@@ -2230,9 +2240,22 @@ ID: ${generationResult.id}
           const base64Images = await Promise.all(
             images.map((img) => this.convertTelegramImageToBase64(img.file_id)),
           );
-          klingRequest.images = base64Images;
+
+          // Используем новую логику с image и image_tail
+          if (base64Images.length >= 1) {
+            klingRequest.image = base64Images[0]; // Первое изображение - начальный кадр
+            this.logger.log('🖼️ Set start frame (image) for video generation');
+          }
+
+          if (base64Images.length >= 2) {
+            klingRequest.image_tail = base64Images[1]; // Второе изображение - конечный кадр
+            this.logger.log(
+              '🖼️ Set end frame (image_tail) for video generation',
+            );
+          }
+
           this.logger.log(
-            `🖼️ Converted ${base64Images.length} images to base64 for video generation`,
+            `🖼️ Converted ${base64Images.length} images to base64 for video generation (${klingRequest.image ? 'start' : ''}${klingRequest.image && klingRequest.image_tail ? '+' : ''}${klingRequest.image_tail ? 'end' : ''} frames)`,
           );
         } catch (error) {
           this.logger.error('Error converting images to base64:', error);
