@@ -377,7 +377,7 @@ export class TelegramBotService {
 ▸ Результат: 1 уникальное изображение  
 
 [✨ Изображение → ТРАНСФОРМАЦИЯ]  
-Преобразование изображения (V2.0)  
+Преобразование изображения (Kling V2.1)  
 ▸ Пример: Ваше фото + "В стиле Пикассо"  
 ▸ Стоимость: 1 токен  
 ▸ Результат: 1 стилизованное изображение
@@ -1942,12 +1942,10 @@ ${subscriptionStatus}${subscriptionDetails}
           );
 
           klingRequest.images = [base64Image];
-          klingRequest.modelName = 'kling-v1-5'; // Use v1.5 for image-to-image
           klingRequest.imageReference = 'subject'; // Use subject reference by default
-          klingRequest.imageFidelity = 0.7; // Medium-high fidelity
+          klingRequest.imageFidelity = 0.7; // Medium-high fidelity (70% верности референсу)
 
           this.logger.log(`🛠️ Image-to-image parameters set:`);
-          this.logger.log(`   - modelName: ${klingRequest.modelName}`);
           this.logger.log(
             `   - imageReference: ${klingRequest.imageReference}`,
           );
@@ -1976,7 +1974,6 @@ ${subscriptionStatus}${subscriptionDetails}
 
           // Ensure all image-related fields are removed
           if (klingRequest.images) delete klingRequest.images;
-          if (klingRequest.modelName) delete klingRequest.modelName;
           if (klingRequest.imageReference) delete klingRequest.imageReference;
           if (klingRequest.imageFidelity) delete klingRequest.imageFidelity;
           if (klingRequest.humanFidelity) delete klingRequest.humanFidelity;
@@ -2001,7 +1998,7 @@ ${subscriptionStatus}${subscriptionDetails}
       this.logger.log(`   - Resolution: ${klingRequest.resolution}`);
       this.logger.log(`   - Aspect ratio: ${klingRequest.aspectRatio}`);
       this.logger.log(`   - Number of images: ${klingRequest.numberOfImages}`);
-      this.logger.log(`   - Model: ${klingRequest.modelName || 'default'}`);
+      this.logger.log(`   - Model: kling-v2-1 (fixed for image generation)`);
       this.logger.log(`   - Has images: ${!!klingRequest.images}`);
       this.logger.log(
         `   - Image reference: ${klingRequest.imageReference || 'N/A'}`,
@@ -2227,10 +2224,10 @@ ID: ${generationResult.id}
         klingRequest.modelName = 'kling-v2-1-master';
         klingRequest.mode = 'std'; // Master использует pro режим для максимального качества
       } else if (quality === 'pro') {
-        klingRequest.modelName = 'kling-v2-master';
+        klingRequest.modelName = 'kling-v1-6';
         klingRequest.mode = 'pro'; // Pro использует pro режим для высокого качества
       } else {
-        klingRequest.modelName = 'kling-v1'; // Для standard используем базовую модель
+        klingRequest.modelName = 'kling-v1-6'; // Для standard используем базовую модель
         klingRequest.mode = 'std'; // Standard использует std режим для экономичности
       }
 
