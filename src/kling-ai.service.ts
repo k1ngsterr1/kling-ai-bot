@@ -91,7 +91,7 @@ export class KlingAiService implements OnModuleInit {
       this.logger.debug(`${label}: No data available`);
       return;
     }
-    
+
     try {
       const stringified = JSON.stringify(obj, null, 2);
       if (stringified === '{}' || stringified === '[]') {
@@ -756,7 +756,10 @@ export class KlingAiService implements OnModuleInit {
         };
       }
 
-      this.safeLogObject(`Task details for ${videoId} (found in ${foundInEndpoint})`, task);
+      this.safeLogObject(
+        `Task details for ${videoId} (found in ${foundInEndpoint})`,
+        task,
+      );
 
       const result: KlingVideoResponse = {
         id: videoId,

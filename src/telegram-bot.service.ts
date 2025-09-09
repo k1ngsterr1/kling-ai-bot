@@ -2492,13 +2492,20 @@ ID: #${videoId}
             message_id: progressMessageId,
             reply_markup: keyboard,
           });
-          this.logger.debug(`Updated progress message: attempt ${attempts}, progress ${progress}%`);
+          this.logger.debug(
+            `Updated progress message: attempt ${attempts}, progress ${progress}%`,
+          );
         } catch (editError: any) {
           // Only log if it's not the "message not modified" error
           if (!editError.message?.includes('message is not modified')) {
-            this.logger.warn('Could not update progress message:', editError.message);
+            this.logger.warn(
+              'Could not update progress message:',
+              editError.message,
+            );
           } else {
-            this.logger.debug(`Progress message unchanged (attempt ${attempts})`);
+            this.logger.debug(
+              `Progress message unchanged (attempt ${attempts})`,
+            );
           }
         }
 
@@ -3071,13 +3078,20 @@ ID: ${imageId}
               message_id: progressMessageId,
               reply_markup: keyboard,
             });
-            this.logger.debug(`Updated image progress: attempt ${attempts}, progress ${Math.floor(progress)}%`);
+            this.logger.debug(
+              `Updated image progress: attempt ${attempts}, progress ${Math.floor(progress)}%`,
+            );
           } catch (editError: any) {
             // Only log if it's not the "message not modified" error
             if (!editError.message?.includes('message is not modified')) {
-              this.logger.warn('Could not update progress message:', editError.message);
+              this.logger.warn(
+                'Could not update progress message:',
+                editError.message,
+              );
             } else {
-              this.logger.debug(`Image progress message unchanged (attempt ${attempts})`);
+              this.logger.debug(
+                `Image progress message unchanged (attempt ${attempts})`,
+              );
             }
           }
         }
@@ -3235,13 +3249,20 @@ ID: ${imageId}
             message_id: progressMessageId,
             reply_markup: keyboard,
           });
-          this.logger.debug(`Updated fallback progress: attempt ${attempts}, progress ${progress}%`);
+          this.logger.debug(
+            `Updated fallback progress: attempt ${attempts}, progress ${progress}%`,
+          );
         } catch (editError: any) {
           // Only log if it's not the "message not modified" error
           if (!editError.message?.includes('message is not modified')) {
-            this.logger.warn('Could not update progress message:', editError.message);
+            this.logger.warn(
+              'Could not update progress message:',
+              editError.message,
+            );
           } else {
-            this.logger.debug(`Fallback progress message unchanged (attempt ${attempts})`);
+            this.logger.debug(
+              `Fallback progress message unchanged (attempt ${attempts})`,
+            );
           }
         }
 
