@@ -689,6 +689,9 @@ ${subscriptionStatus}${subscriptionDetails}
       case 'clear_images':
         this.clearImages(chatId);
         break;
+      case 'clear_images_for_img':
+        this.clearImagesForImg(chatId);
+        break;
       case 'quality_standard':
         this.handleQualitySelection(chatId, 'standard');
         break;
@@ -1240,24 +1243,47 @@ ${subscriptionStatus}${subscriptionDetails}
     const userState = this.userStates.get(chatId);
 
     if (userState?.data) {
+      // Clear images and reset to waiting for prompt
       this.userStates.set(chatId, {
-        ...userState,
-        data: { ...userState.data, images: [] },
+        state: 'waiting_video_prompt',
+        data: {},
       });
 
       this.bot.sendMessage(
         chatId,
-        '🗑️ Изображения очищены. Можете добавить новые или перейти к настройкам генерации.',
+        '🗑️ Изображения и промпт очищены. Отправьте новое описание для видео.',
         {
           reply_markup: {
             inline_keyboard: [
-              [
-                {
-                  text: '⚙️ Настройки генерации',
-                  callback_data: 'video_settings',
-                },
-              ],
               [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+            ],
+          },
+        },
+      );
+    }
+  }
+
+  private clearImagesForImg(chatId: number) {
+    const userState = this.userStates.get(chatId);
+
+    if (userState?.data) {
+      // Clear the reference photo
+      const updatedData = { ...userState.data };
+      delete updatedData.referencePhoto;
+
+      this.userStates.set(chatId, {
+        state: 'waiting_image_prompt',
+        data: updatedData,
+      });
+
+      this.bot.sendMessage(
+        chatId,
+        '🗑️ Изображение очищено. Отправьте новое фото с промптом или просто текст промпта.',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔙 Назад к /img', callback_data: 'image' }],
+              [{ text: '🏠 Главное меню', callback_data: 'main' }],
             ],
           },
         },
@@ -1840,7 +1866,7 @@ ${subscriptionStatus}${subscriptionDetails}
             callback_data: 'confirm_image_generation',
           },
         ],
-        [{ text: '🔙 Назад к изображениям', callback_data: 'image' }],
+        [{ text: '🔙 Назад к /img', callback_data: 'image' }],
       ],
     };
 
@@ -3711,13 +3737,171 @@ ID: ${imageId}
             },
           ],
           [
-            { text: '🔙 Назад к изображениям', callback_data: 'image' },
+            { text: '🔙 Назад к /img', callback_data: 'image' },
             { text: '🏠 Главное меню', callback_data: 'main' },
           ],
         ],
       };
 
       this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      return;
+    }
+
+    if (userState?.state === 'waiting_text_prompt_for_photo') {
+      // User sent a photo without caption, now they're providing the text prompt
+      if (text.length > 300) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
+        );
+        return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
+      }
+
+      // Get the saved photo from state
+      const referencePhoto = userState.data?.referencePhoto;
+
+      if (referencePhoto) {
+        // Save the prompt and show aspect ratio selection
+        this.userStates.set(chatId, {
+          state: 'image_prompt_received',
+          data: {
+            prompt: text,
+            referencePhoto: referencePhoto,
+          },
+        });
+
+        const responseText = `
+📸 Изображение 1/2 добавлено!
+📷 Можете добавить еще 1 изображение
+
+Промпт: "${text}"
+Изображений: 1/2
+
+Выберите соотношение сторон:
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              { text: '⬜ 1:1 (квадрат)', callback_data: 'image_ratio_1:1' },
+              {
+                text: '📱 9:16 (вертикаль)',
+                callback_data: 'image_ratio_9:16',
+              },
+            ],
+            [
+              {
+                text: '🖥️ 16:9 (горизонталь)',
+                callback_data: 'image_ratio_16:9',
+              },
+              { text: '📋 4:3', callback_data: 'image_ratio_4:3' },
+            ],
+            [
+              { text: '🖼️ 3:2', callback_data: 'image_ratio_3:2' },
+              { text: '🎬 21:9 (ультра)', callback_data: 'image_ratio_21:9' },
+            ],
+            [
+              {
+                text: '🗑️ Очистить изображения',
+                callback_data: 'clear_images_for_img',
+              },
+            ],
+            [{ text: '🔙 Назад к /img', callback_data: 'image' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      } else {
+        // Photo data was lost, ask to start over
+        this.bot.sendMessage(
+          chatId,
+          '❌ Фото не найдено. Пожалуйста, отправьте фото заново.',
+        );
+        this.userStates.set(chatId, { state: 'waiting_image_prompt' });
+      }
+      return;
+    }
+
+    if (userState?.state === 'waiting_text_prompt_for_video_photo') {
+      // User sent photo(s) without caption for video, now they're providing the text prompt
+      if (text.length > 300) {
+        this.bot.sendMessage(
+          chatId,
+          '⚠️ Промпт слишком длинный! Максимальная длина: 300 символов. Попробуйте сократить описание.',
+        );
+        return;
+      }
+
+      // Move user to HIGH_INTENT group when they provide a prompt
+      if (msg.from?.id) {
+        const currentGroup = this.userGroups.get(msg.from.id);
+        if (currentGroup === 'new_id' || currentGroup === 'never_paid') {
+          this.addUserToGroup(msg.from.id, 'high_intent');
+        }
+      }
+
+      // Get the saved photos from state
+      const savedImages = userState.data?.images || [];
+
+      if (savedImages.length > 0) {
+        // Save the prompt and transition to video generation flow
+        this.userStates.set(chatId, {
+          state: 'video_prompt_received',
+          data: {
+            prompt: text,
+            images: savedImages,
+          },
+        });
+
+        const responseText = `
+📸 ${savedImages.length === 1 ? 'Изображение' : 'Изображения'} ${savedImages.length}/2 добавлено!
+${
+  savedImages.length === 2
+    ? '✅ Достигнут лимит изображений (2/2)'
+    : `📷 Можете добавить еще ${2 - savedImages.length} изображение`
+}
+
+Промпт: "${text}"
+Изображений: ${savedImages.length}/2
+
+Готовы к генерации?
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '✅ Продолжить',
+                callback_data: 'video_settings',
+              },
+            ],
+            [
+              {
+                text: '🗑️ Очистить изображения',
+                callback_data: 'clear_images',
+              },
+            ],
+            [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      } else {
+        // Photos data was lost, ask to start over
+        this.bot.sendMessage(
+          chatId,
+          '❌ Фото не найдены. Пожалуйста, отправьте фото заново.',
+        );
+        this.userStates.set(chatId, { state: 'waiting_video_prompt' });
+      }
       return;
     }
 
@@ -3856,10 +4040,11 @@ ID: ${imageId}
       });
 
       const responseText = `
-📸 Референсное изображение добавлено!
+📸 Изображение 1/2 добавлено!
+📷 Можете добавить еще 1 изображение
 
 Промпт: "${caption}"
-📷 С референсным фото
+Изображений: 1/2
 
 Выберите соотношение сторон:
       `;
@@ -3881,11 +4066,53 @@ ID: ${imageId}
             { text: '🖼️ 3:2', callback_data: 'image_ratio_3:2' },
             { text: '🎬 21:9 (ультра)', callback_data: 'image_ratio_21:9' },
           ],
-          [{ text: '🔙 Назад к изображениям', callback_data: 'image' }],
+          [
+            {
+              text: '�️ Очистить изображения',
+              callback_data: 'clear_images_for_img',
+            },
+          ],
+          [{ text: '🔙 Назад к /img', callback_data: 'image' }],
         ],
       };
 
       this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      return;
+    }
+
+    // Handle photo without caption when user is waiting for image prompt
+    if (userState?.state === 'waiting_image_prompt' && !caption) {
+      this.logger.log(
+        '📸 Photo(s) without caption received in waiting_image_prompt state',
+      );
+
+      // Save the first photo temporarily and ask for prompt
+      const referencePhoto = allPhotos[0];
+      if (referencePhoto) {
+        this.userStates.set(chatId, {
+          state: 'waiting_text_prompt_for_photo',
+          data: {
+            referencePhoto: {
+              file_id: referencePhoto.file_id,
+              file_unique_id: referencePhoto.file_unique_id,
+            },
+          },
+        });
+
+        const responseText = `
+✨ Отлично, фото загружено!
+Теперь расскажи, что нужно создать?
+Напиши свой запрос текстом — и нейросеть сделает всё остальное!
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🔙 Назад к /img', callback_data: 'image' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      }
       return;
     }
 
@@ -3918,6 +4145,30 @@ ID: ${imageId}
         file_unique_id: photo.file_unique_id,
       }));
 
+      // Check if user is trying to upload more than 2 photos
+      if (photoObjects.length > 2) {
+        this.bot.sendMessage(
+          chatId,
+          `⚠️ Вы загрузили слишком много фотографий.
+🖼️ Как использовать изображения (до 2 шт):
+
+📸 **1 фото** = Начальный кадр видео
+  ↳ Видео начинается с загруженного вами изображения
+📸 **2 фото** = Начальный кадр + Конечный кадр
+   ↳ Видео плавно переходит от первого ко второму изображению
+
+Загрузите требуемое количество фото и напишите промпт`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+              ],
+            },
+          },
+        );
+        return;
+      }
+
       // Limit to 2 photos maximum
       const limitedPhotos = photoObjects.slice(0, 2);
 
@@ -3948,7 +4199,7 @@ ${
         inline_keyboard: [
           [
             {
-              text: '⚙️ Настройки генерации',
+              text: '✅ Продолжить',
               callback_data: 'video_settings',
             },
           ],
@@ -3977,7 +4228,28 @@ ${
       if (totalImagesAfterAdd > 2) {
         this.bot.sendMessage(
           chatId,
-          '⚠️ Максимум 2 изображения! Удалите существующие или перейдите к настройкам генерации.',
+          `⚠️ Вы загрузили слишком много фотографий.
+🖼️ Как использовать изображения (до 2 шт):
+
+📸 **1 фото** = Начальный кадр видео
+  ↳ Видео начинается с загруженного вами изображения
+📸 **2 фото** = Начальный кадр + Конечный кадр
+   ↳ Видео плавно переходит от первого ко второму изображению
+
+Загрузите требуемое количество фото и напишите промпт`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🗑️ Очистить изображения',
+                    callback_data: 'clear_images',
+                  },
+                ],
+                [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+              ],
+            },
+          },
         );
         return;
       }
@@ -4015,7 +4287,7 @@ ${
         inline_keyboard: [
           [
             {
-              text: '⚙️ Настройки генерации',
+              text: '✅ Продолжить',
               callback_data: 'video_settings',
             },
           ],
@@ -4025,6 +4297,61 @@ ${
               callback_data: 'clear_images',
             },
           ],
+          [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+        ],
+      };
+
+      this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+    } else if (!caption) {
+      // User sent photo(s) without caption and without existing prompt - need to ask for prompt
+      const photoObjects = allPhotos.map((photo) => ({
+        file_id: photo.file_id,
+        file_unique_id: photo.file_unique_id,
+      }));
+
+      // Check if user is trying to upload more than 2 photos
+      if (photoObjects.length > 2) {
+        this.bot.sendMessage(
+          chatId,
+          `⚠️ Вы загрузили слишком много фотографий.
+🖼️ Как использовать изображения (до 2 шт):
+
+📸 **1 фото** = Начальный кадр видео
+  ↳ Видео начинается с загруженного вами изображения
+📸 **2 фото** = Начальный кадр + Конечный кадр
+   ↳ Видео плавно переходит от первого ко второму изображению
+
+Загрузите требуемое количество фото и напишите промпт`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+              ],
+            },
+          },
+        );
+        return;
+      }
+
+      // Limit to 2 photos maximum
+      const limitedPhotos = photoObjects.slice(0, 2);
+
+      // Save the photos and ask for prompt
+      this.userStates.set(chatId, {
+        state: 'waiting_text_prompt_for_video_photo',
+        data: {
+          images: limitedPhotos,
+        },
+      });
+
+      const responseText = `
+✨ Отлично, фото загружено!
+Теперь расскажи, что нужно создать?
+Напиши свой запрос текстом — и нейросеть сделает всё остальное!
+      `;
+
+      const keyboard = {
+        inline_keyboard: [
           [{ text: '🔙 Назад к видео', callback_data: 'video' }],
         ],
       };
@@ -4096,10 +4423,11 @@ ${
         });
 
         const responseText = `
-📸 Референсное изображение добавлено!
+📸 Изображение 1/2 добавлено!
+📷 Можете добавить еще 1 изображение
 
 Промпт: "${caption}"
-📷 С референсным фото
+Изображений: 1/2
 
 Выберите соотношение сторон:
         `;
@@ -4124,7 +4452,49 @@ ${
               { text: '🖼️ 3:2', callback_data: 'image_ratio_3:2' },
               { text: '🎬 21:9 (ультра)', callback_data: 'image_ratio_21:9' },
             ],
-            [{ text: '🔙 Назад к изображениям', callback_data: 'image' }],
+            [
+              {
+                text: '�️ Очистить изображения',
+                callback_data: 'clear_images_for_img',
+              },
+            ],
+            [{ text: '🔙 Назад к /img', callback_data: 'image' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      }
+      return;
+    }
+
+    // Handle photo without caption when user is waiting for image prompt
+    if (userState?.state === 'waiting_image_prompt' && !caption) {
+      this.logger.log(
+        '📸 Photo without caption received in waiting_image_prompt state',
+      );
+
+      // Save the photo temporarily and ask for prompt
+      const photo = msg.photo?.[msg.photo.length - 1];
+      if (photo) {
+        this.userStates.set(chatId, {
+          state: 'waiting_text_prompt_for_photo',
+          data: {
+            referencePhoto: {
+              file_id: photo.file_id,
+              file_unique_id: photo.file_unique_id,
+            },
+          },
+        });
+
+        const responseText = `
+✨ Отлично, фото загружено!
+Теперь расскажи, что нужно создать?
+Напиши свой запрос текстом — и нейросеть сделает всё остальное!
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🔙 Назад к /img', callback_data: 'image' }],
           ],
         };
 
@@ -4187,7 +4557,7 @@ ${
           inline_keyboard: [
             [
               {
-                text: '⚙️ Настройки генерации',
+                text: '✅ Продолжить',
                 callback_data: 'video_settings',
               },
             ],
@@ -4216,7 +4586,28 @@ ${
       if (currentImages.length >= 2) {
         this.bot.sendMessage(
           chatId,
-          '⚠️ Максимум 2 изображения! Удалите существующие или перейдите к настройкам генерации.',
+          `⚠️ Вы загрузили слишком много фотографий.
+🖼️ Как использовать изображения (до 2 шт):
+
+📸 **1 фото** = Начальный кадр видео
+  ↳ Видео начинается с загруженного вами изображения
+📸 **2 фото** = Начальный кадр + Конечный кадр
+   ↳ Видео плавно переходит от первого ко второму изображению
+
+Загрузите требуемое количество фото и напишите промпт`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🗑️ Очистить изображения',
+                    callback_data: 'clear_images',
+                  },
+                ],
+                [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+              ],
+            },
+          },
         );
         return;
       }
@@ -4253,7 +4644,7 @@ ${
           inline_keyboard: [
             [
               {
-                text: '⚙️ Настройки генерации',
+                text: '✅ Продолжить',
                 callback_data: 'video_settings',
               },
             ],
@@ -4263,6 +4654,37 @@ ${
                 callback_data: 'clear_images',
               },
             ],
+            [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+          ],
+        };
+
+        this.bot.sendMessage(chatId, responseText, { reply_markup: keyboard });
+      }
+    } else if (!caption) {
+      // User sent photo(s) without caption and without existing prompt - need to ask for prompt
+      const photo = msg.photo?.[msg.photo.length - 1];
+      if (photo) {
+        // Save the photo and ask for prompt
+        this.userStates.set(chatId, {
+          state: 'waiting_text_prompt_for_video_photo',
+          data: {
+            images: [
+              {
+                file_id: photo.file_id,
+                file_unique_id: photo.file_unique_id,
+              },
+            ],
+          },
+        });
+
+        const responseText = `
+✨ Отлично, фото загружено!
+Теперь расскажи, что нужно создать?
+Напиши свой запрос текстом — и нейросеть сделает всё остальное!
+        `;
+
+        const keyboard = {
+          inline_keyboard: [
             [{ text: '🔙 Назад к видео', callback_data: 'video' }],
           ],
         };
@@ -4565,7 +4987,7 @@ ${
         inline_keyboard: [
           [
             {
-              text: '⚙️ Настройки генерации',
+              text: '✅ Продолжить',
               callback_data: 'video_settings',
             },
           ],
@@ -4589,7 +5011,28 @@ ${
       if (currentImages.length >= 2) {
         this.bot.sendMessage(
           chatId,
-          '⚠️ Максимум 2 изображения для генерации видео.',
+          `⚠️ Вы загрузили слишком много фотографий.
+🖼️ Как использовать изображения (до 2 шт):
+
+📸 **1 фото** = Начальный кадр видео
+  ↳ Видео начинается с загруженного вами изображения
+📸 **2 фото** = Начальный кадр + Конечный кадр
+   ↳ Видео плавно переходит от первого ко второму изображению
+
+Загрузите требуемое количество фото и напишите промпт`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🗑️ Очистить изображения',
+                    callback_data: 'clear_images',
+                  },
+                ],
+                [{ text: '🔙 Назад к видео', callback_data: 'video' }],
+              ],
+            },
+          },
         );
         return;
       }
@@ -4625,7 +5068,7 @@ ${
         inline_keyboard: [
           [
             {
-              text: '⚙️ Настройки генерации',
+              text: '✅ Продолжить',
               callback_data: 'video_settings',
             },
           ],
